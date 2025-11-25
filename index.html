@@ -1,0 +1,48 @@
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shared Array Buffer MapReduce</title>
+</head>
+
+<body>
+
+    <style>
+        .inputs {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: 50%;
+        }
+    </style>
+
+    <main class="container">
+        <h1>Shared Array Buffer MapReduce</h1>
+        <div class="inputs">
+            <label for="file-input">Drop your file here:</label>
+            <input type="file" id="file-input" accept=".txt">
+            <button type="button" onclick="readValue()">Read</button>
+            <div id="file-content"></div>
+
+            <label for="map-function">Map Function:</label>
+            <input type="text" id="map-function" placeholder="Enter your map function" required>
+
+            <label for="reduce-function">Reduce Function:</label>
+            <input type="text" id="reduce-function" placeholder="Enter your reduce function" required>
+
+            <label for="num-workers">Number of Workers:</label>
+            <input type="number" id="num-workers" placeholder="Enter the number of workers (default: 4)" min="1"
+                value="4" required>
+
+            <button type="submit" onclick="initializeMapReduce()">Apply Map Reduce</button>
+            <div id="result">
+                <h2>Result</h2>
+                <p id="result"></p>
+            </div>
+        </div>
+        <script src="script.js"></script>
+    </main>
+</body>
+
+</html>
