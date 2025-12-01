@@ -2,7 +2,11 @@ self.onmessage = function(event) {
     try {
         const { sharedBuffer, start, length, mapFunction } = event.data
 
-        const chunkView = new Uint8Array(sharedBuffer, start, length)
+        // Create a view of the shared buffer
+        const sharedView = new Uint8Array(sharedBuffer, start, length)
+        // Copy to a regular (non-shared) Uint8Array so TextDecoder can work with it
+        const chunkView = new Uint8Array(sharedView)
+        
         const mapFunctionObj = new Function('view', 'start', 'length', mapFunction)
         
         const result = mapFunctionObj(chunkView, start, length)

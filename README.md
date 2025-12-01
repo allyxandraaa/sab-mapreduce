@@ -35,11 +35,28 @@ Terminate the server with `Ctrl + C`.
 4. Specify the number of worker threads (default: 4)
 5. Click "Apply Map Reduce" to initiate processing
 
-### Example: Word Count
+### Example 1: Simple Text Length Count
 
 **Map Function:**
 ```javascript
-return curr.split(/\s+/).reduce((acc, word) => {
+const decoder = new TextDecoder('utf-8');
+const text = decoder.decode(view);
+return text.length;
+```
+
+**Reduce Function:**
+```javascript
+return acc + curr;
+```
+
+### Example 2: Word Count
+
+**Map Function:**
+```javascript
+const decoder = new TextDecoder('utf-8');
+const text = decoder.decode(view);
+const words = text.split(/\s+/).filter(word => word.length > 0);
+return words.reduce((acc, word) => {
     acc[word] = (acc[word] || 0) + 1;
     return acc;
 }, {});
