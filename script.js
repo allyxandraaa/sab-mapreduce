@@ -112,18 +112,26 @@ async function initializeMapReduce() {
     console.log(`Starting processing ${bufferLength} bytes with ${numWorkers} workers...`)
 
     try {
-        const mapResults = await runMapReduce(sharedBuffer, bufferLength, numWorkers, mapFunctionString)
+        // 1. Map phase - воркери обробляють файл
+        const mapWorkersWithResults = await runMapPhase(sharedBuffer, bufferLength, numWorkers, mapFunctionString)
+        console.log("Map phase finished. Results:", mapWorkersWithResults.map(w => w.result))
 
-        console.log("Map phase finished. Results:", mapResults)
+        // 2. Shuffle phase - сортування та групування за ключами
+        const shuffledData = await runShufflePhase(mapWorkersWithResults, numWorkers)
+        console.log("Shuffle phase finished. Shuffled data distributed to workers")
 
-        // 2. Запуск Reduce фази
-        // Спочатку об'єднуємо всі масиви від воркерів в один плоский масив
-        // І виконуємо reduce
-        const flatResults = mapResults.flat()
+        // 3. Reduce phase - перевикористовуємо тих самих воркерів
+        const reduceResults = await runReducePhase(mapWorkersWithResults, reduceFunctionString, shuffledData)
+        console.log("Reduce phase finished. Results:", reduceResults)
+
+        // 4. Фінальне об'єднання результатів від всіх воркерів
         const reduceFunction = new Function('acc', 'curr', reduceFunctionString)
-        const finalResult = flatResults.reduce((acc, curr) => reduceFunction(acc, curr), {})
+        const finalResult = reduceResults.reduce((acc, curr) => reduceFunction(acc, curr), {})
 
         console.log("Final Result:", finalResult)
+
+        // 5. Термінуємо всіх воркерів
+        mapWorkersWithResults.forEach(({ worker }) => worker.terminate())
 
         const resultElement = document.getElementById('result-output')
         if (resultElement) {
@@ -141,30 +149,17 @@ async function initializeMapReduce() {
     }
 }
 
-function runMapReduce(sharedBuffer, bufferLength, numWorkers, mapFunctionString) {
-    const chunkSize = Math.ceil(bufferLength / numWorkers)
-    const workers = []
-
-    for (let i = 0; i < numWorkers; i++) {
-        const start = i * chunkSize
-        const end = Math.min(start + chunkSize, bufferLength)
-        const length = end - start
-
-        // Створюємо worker для обробки частини SharedArrayBuffer
-        workers.push(spawnWorker(sharedBuffer, start, length, mapFunctionString))
-    }
-
-    return Promise.all(workers)
-}
-
-function spawnWorker(sharedBuffer, start, length, mapFunctionString) {
+function spawnMapWorker(sharedBuffer, start, length, mapFunctionString) {
     return new Promise((resolve, reject) => {
         const worker = new Worker('worker.js')
 
+        // Обробка результатів від воркера
         worker.onmessage = function (event) {
-            if (event.data.type === 'success') {
-                resolve(event.data.result)
-                worker.terminate()
+            if (event.data.type === 'success' && event.data.phase === 'map') {
+                resolve({
+                    worker: worker,
+                    result: event.data.result
+                })
             } else if (event.data.type === 'error') {
                 reject(new Error(event.data.error))
                 worker.terminate()
@@ -178,10 +173,54 @@ function spawnWorker(sharedBuffer, start, length, mapFunctionString) {
 
         // Відправляємо SharedArrayBuffer та параметри
         worker.postMessage({
+            phase: 'map',
             sharedBuffer: sharedBuffer,
             start: start,
             length: length,
             mapFunction: mapFunctionString
         })
     })
+}
+
+function runMapPhase(sharedBuffer, bufferLength, numWorkers, mapFunctionString) {
+    const chunkSize = Math.ceil(bufferLength / numWorkers)
+    const mapWorkers = []
+
+    for (let i = 0; i < numWorkers; i++) {
+        const start = i * chunkSize
+        const end = Math.min(start + chunkSize, bufferLength)
+        const length = end - start
+
+        mapWorkers.push(spawnMapWorker(sharedBuffer, start, length, mapFunctionString))
+    }
+
+    return Promise.all(mapWorkers)
+}
+
+function runReducePhase(workersWithResults, reduceFunctionString) {
+    const reducePromises = workersWithResults.map(({ worker, result }) => {
+        return new Promise((resolve, reject) => {
+            const flatResult = Array.isArray(result) ? result.flat() : [result]
+
+            worker.onmessage = function (event) {
+                if (event.data.type === 'success' && event.data.phase === 'reduce') {
+                    resolve(event.data.result)
+                } else if (event.data.type === 'error') {
+                    reject(new Error(event.data.error))
+                }
+            }
+
+            worker.onerror = function (err) {
+                reject(new Error(`Worker error: ${err.message}`))
+            }
+
+            worker.postMessage({
+                phase: 'reduce',
+                reduceFunction: reduceFunctionString,
+                data: flatResult
+            })
+        })
+    })
+
+    return Promise.all(reducePromises)
 }
