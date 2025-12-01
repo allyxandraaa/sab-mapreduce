@@ -116,17 +116,19 @@ async function initializeMapReduce() {
         const mapWorkersWithResults = await runMapPhase(sharedBuffer, bufferLength, numWorkers, mapFunctionString)
         console.log("Map phase finished. Results:", mapWorkersWithResults.map(w => w.result))
 
-        // 2. Shuffle phase - сортування та групування за ключами
-        const shuffledData = await runShufflePhase(mapWorkersWithResults, numWorkers)
-        console.log("Shuffle phase finished. Shuffled data distributed to workers")
+        // 2. Shuffle and Sort phase - сортування та групування за ключами
+        const shuffledData = await runShuffleAndSortPhase(mapWorkersWithResults, numWorkers)
+        console.log("Shuffle and Sort phase finished. Results:", shuffledData)
 
         // 3. Reduce phase - перевикористовуємо тих самих воркерів
         const reduceResults = await runReducePhase(mapWorkersWithResults, reduceFunctionString, shuffledData)
         console.log("Reduce phase finished. Results:", reduceResults)
 
         // 4. Фінальне об'єднання результатів від всіх воркерів
-        const reduceFunction = new Function('acc', 'curr', reduceFunctionString)
-        const finalResult = reduceResults.reduce((acc, curr) => reduceFunction(acc, curr), {})
+        const finalResult = reduceResults.reduce((acc, curr) => {
+            // Об'єднуємо об'єкти від різних воркерів
+            return { ...acc, ...curr }
+        }, {})
 
         console.log("Final Result:", finalResult)
 
@@ -147,7 +149,7 @@ async function initializeMapReduce() {
         console.error("MapReduce failed:", error)
         alert(`Error: ${error.message}`)
     }
-}
+}   
 
 function spawnMapWorker(sharedBuffer, start, length, mapFunctionString) {
     return new Promise((resolve, reject) => {
@@ -197,30 +199,93 @@ function runMapPhase(sharedBuffer, bufferLength, numWorkers, mapFunctionString) 
     return Promise.all(mapWorkers)
 }
 
-function runReducePhase(workersWithResults, reduceFunctionString) {
-    const reducePromises = workersWithResults.map(({ worker, result }) => {
-        return new Promise((resolve, reject) => {
-            const flatResult = Array.isArray(result) ? result.flat() : [result]
-
-            worker.onmessage = function (event) {
-                if (event.data.type === 'success' && event.data.phase === 'reduce') {
-                    resolve(event.data.result)
-                } else if (event.data.type === 'error') {
-                    reject(new Error(event.data.error))
+// Shuffle and Sort phase: збирає, сортує, групує та розподіляє дані
+async function runShuffleAndSortPhase(mapWorkersWithResults, numWorkers) {
+    // 1. Збираємо всі пари [key, value] від всіх Map-воркерів
+    const allPairs = []
+    
+    mapWorkersWithResults.forEach(({ result }) => {
+        if (!Array.isArray(result)) {
+            return
+        }
+        
+        // Рекурсивна функція для збору всіх пар [key, value]
+        const collectPairs = (arr) => {
+            arr.forEach(item => {
+                if (Array.isArray(item)) {
+                    if (item.length === 2 && !Array.isArray(item[0]) && !Array.isArray(item[1])) {
+                        // Це пара [key, value] - додаємо
+                        allPairs.push(item)
+                    } else {
+                        // Це вкладений масив - рекурсивно обробляємо
+                        collectPairs(item)
+                    }
+                } else if (typeof item === 'object' && item !== null) {
+                    // Це об'єкт {key: value} - конвертуємо в пари
+                    Object.entries(item).forEach(([key, value]) => {
+                        if (typeof value === 'number' && value > 0) {
+                            // Створюємо value пар [key, 1] для кожного входження
+                            for (let i = 0; i < value; i++) {
+                                allPairs.push([key, 1])
+                            }
+                        } else {
+                            allPairs.push([key, value])
+                        }
+                    })
                 }
-            }
-
-            worker.onerror = function (err) {
-                reject(new Error(`Worker error: ${err.message}`))
-            }
-
-            worker.postMessage({
-                phase: 'reduce',
-                reduceFunction: reduceFunctionString,
-                data: flatResult
             })
-        })
+        }
+        
+        collectPairs(result)
     })
 
-    return Promise.all(reducePromises)
+    if (allPairs.length === 0) {
+        return Array(numWorkers).fill(null).map(() => ({}))
+    }
+
+    // 2. Сортуємо за ключами
+    allPairs.sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+
+    // 3. Групуємо значення за ключами
+    const grouped = {}
+    allPairs.forEach(([key, value]) => {
+        const keyStr = String(key)
+        if (!grouped[keyStr]) grouped[keyStr] = []
+        grouped[keyStr].push(value)
+    })
+
+    // 4. Розподіляємо між воркерами (простий хеш)
+    const distributed = Array(numWorkers).fill(null).map(() => ({}))
+    Object.entries(grouped).forEach(([key, values]) => {
+        const hash = String(key).split('').reduce((h, c) => h + c.charCodeAt(0), 0)
+        distributed[hash % numWorkers][key] = values
+    })
+
+    return distributed
+}
+
+function runReducePhase(workersWithResults, reduceFunctionString, shuffledData) {
+    return Promise.all(
+        workersWithResults.map(({ worker }, i) => {
+            return new Promise((resolve, reject) => {
+                const data = Object.entries(shuffledData[i] || {})
+
+                worker.onmessage = (e) => {
+                    if (e.data.type === 'success' && e.data.phase === 'reduce') {
+                        resolve(e.data.result)
+                    } else if (e.data.type === 'error') {
+                        reject(new Error(e.data.error))
+                    }
+                }
+
+                worker.onerror = (err) => reject(new Error(`Worker error: ${err.message}`))
+
+                worker.postMessage({
+                    phase: 'reduce',
+                    reduceFunction: reduceFunctionString,
+                    data: data
+                })
+            })
+        })
+    )
 }

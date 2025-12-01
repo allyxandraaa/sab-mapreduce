@@ -23,10 +23,27 @@ self.onmessage = function(event) {
             })
             
         } else if (phase === 'reduce') {
-            // Фаза Reduce: обробка результатів Map
+            // Фаза Reduce: обробка результатів після shuffle
+            // data має формат: [[key, [values]], [key2, [values2]], ...]
             const reduceFunctionObj = new Function('acc', 'curr', reduceFunction)
             const initialValue = {}
-            const result = data.reduce((acc, curr) => reduceFunctionObj(acc, curr), initialValue)
+            
+            // Обробляємо кожну пару [key, [values]]
+            const result = data.reduce((acc, curr) => {
+                if (Array.isArray(curr) && curr.length === 2) {
+                    const [key, values] = curr
+                    // Створюємо об'єкт для поточного ключа
+                    const currObj = { [key]: values }
+                    // Викликаємо reduce функцію
+                    const newAcc = reduceFunctionObj(acc, currObj)
+                    // Переконуємося, що повертається об'єкт
+                    return newAcc !== undefined ? newAcc : acc
+                } else {
+                    // Якщо формат інший, передаємо як є
+                    const newAcc = reduceFunctionObj(acc, curr)
+                    return newAcc !== undefined ? newAcc : acc
+                }
+            }, initialValue)
             
             self.postMessage({
                 type: 'success',
