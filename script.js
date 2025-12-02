@@ -112,12 +112,26 @@ async function initializeMapReduce() {
     console.log(`Starting processing ${bufferLength} bytes with ${numWorkers} workers...`)
 
     try {
-        // 1. Map phase - воркери обробляють файл
-        const mapWorkersWithResults = await runMapPhase(sharedBuffer, bufferLength, numWorkers, mapFunctionString)
+        // 1. Map phase з streaming - воркери обробляють файл, Shuffle починає збирати дані по мірі надходження
+        const shuffleCollector = new StreamingShuffle(numWorkers)
+        
+        const mapWorkersWithResults = await runMapPhaseStreaming(
+            sharedBuffer, 
+            bufferLength, 
+            numWorkers, 
+            mapFunctionString,
+            // Callback викликається, коли воркер завершив Map фазу
+            (result, workerIndex, completedCount, totalWorkers) => {
+                console.log(`Worker ${workerIndex} completed Map phase (${completedCount}/${totalWorkers})`)
+                // Починаємо збирати дані для Shuffle одразу, не чекаючи інших воркерів
+                shuffleCollector.addResult(result.result)
+            }
+        )
+        
         console.log("Map phase finished. Results:", mapWorkersWithResults.map(w => w.result))
 
-        // 2. Shuffle and Sort phase - сортування та групування за ключами
-        const shuffledData = await runShuffleAndSortPhase(mapWorkersWithResults, numWorkers)
+        // 2. Shuffle and Sort phase - виконуємо фінальне сортування та розподіл
+        const shuffledData = shuffleCollector.finalize()
         console.log("Shuffle and Sort phase finished. Results:", shuffledData)
 
         // 3. Reduce phase - перевикористовуємо тих самих воркерів
@@ -125,14 +139,23 @@ async function initializeMapReduce() {
         console.log("Reduce phase finished. Results:", reduceResults)
 
         // 4. Фінальне об'єднання результатів від всіх воркерів
-        const finalResult = reduceResults.reduce((acc, curr) => {
+        const mergedResult = reduceResults.reduce((acc, curr) => {
             // Об'єднуємо об'єкти від різних воркерів
             return { ...acc, ...curr }
         }, {})
 
+        // 5. Сортуємо ключі для кращого відображення
+        const sortedKeys = Object.keys(mergedResult).sort((a, b) => 
+            String(a).localeCompare(String(b))
+        )
+        const finalResult = {}
+        sortedKeys.forEach(key => {
+            finalResult[key] = mergedResult[key]
+        })
+
         console.log("Final Result:", finalResult)
 
-        // 5. Термінуємо всіх воркерів
+        // 6. Термінуємо всіх воркерів
         mapWorkersWithResults.forEach(({ worker }) => worker.terminate())
 
         const resultElement = document.getElementById('result-output')
@@ -199,6 +222,108 @@ function runMapPhase(sharedBuffer, bufferLength, numWorkers, mapFunctionString) 
     return Promise.all(mapWorkers)
 }
 
+// Streaming версія Map фази - дозволяє обробляти результати по мірі надходження
+async function runMapPhaseStreaming(sharedBuffer, bufferLength, numWorkers, mapFunctionString, onResultCallback) {
+    const chunkSize = Math.ceil(bufferLength / numWorkers)
+    const mapWorkers = []
+    const results = []
+    let completedCount = 0
+
+    for (let i = 0; i < numWorkers; i++) {
+        const start = i * chunkSize
+        const end = Math.min(start + chunkSize, bufferLength)
+        const length = end - start
+
+        // Створюємо проміс для кожного воркера
+        const workerPromise = spawnMapWorker(sharedBuffer, start, length, mapFunctionString)
+            .then(result => {
+                results[i] = result
+                completedCount++
+                
+                // Викликаємо callback з результатом, коли воркер завершився
+                if (onResultCallback) {
+                    onResultCallback(result, i, completedCount, numWorkers)
+                }
+                
+                return result
+            })
+        
+        mapWorkers.push(workerPromise)
+    }
+
+    // Чекаємо завершення всіх воркерів
+    await Promise.all(mapWorkers)
+    return results
+}
+
+// Streaming Shuffle: збирає дані по мірі надходження
+class StreamingShuffle {
+    constructor(numWorkers) {
+        this.numWorkers = numWorkers
+        this.allPairs = []
+        this.receivedResults = 0
+        this.totalWorkers = 0
+    }
+
+    // Додає результати від одного воркера
+    addResult(result) {
+        if (!Array.isArray(result)) {
+            return
+        }
+        
+        // Рекурсивна функція для збору всіх пар [key, value]
+        const collectPairs = (arr) => {
+            arr.forEach(item => {
+                if (Array.isArray(item)) {
+                    if (item.length === 2 && !Array.isArray(item[0]) && !Array.isArray(item[1])) {
+                        // Це пара [key, value] - додаємо
+                        this.allPairs.push(item)
+                    } else {
+                        // Це вкладений масив - рекурсивно обробляємо
+                        collectPairs(item)
+                    }
+                } else if (typeof item === 'object' && item !== null) {
+                    // Це об'єкт {key: value} - конвертуємо в пари
+                    Object.entries(item).forEach(([key, value]) => {
+                        // Просто додаємо пару [key, value] - групування обробить значення пізніше
+                        this.allPairs.push([key, value])
+                    })
+                }
+            })
+        }
+        
+        collectPairs(result)
+        this.receivedResults++
+    }
+
+    // Виконує фінальне сортування, групування та розподіл
+    finalize() {
+        if (this.allPairs.length === 0) {
+            return Array(this.numWorkers).fill(null).map(() => ({}))
+        }
+
+        // Сортуємо за ключами
+        this.allPairs.sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+
+        // Групуємо значення за ключами
+        const grouped = {}
+        this.allPairs.forEach(([key, value]) => {
+            const keyStr = String(key)
+            if (!grouped[keyStr]) grouped[keyStr] = []
+            grouped[keyStr].push(value)
+        })
+
+        // Розподіляємо між воркерами (простий хеш)
+        const distributed = Array(this.numWorkers).fill(null).map(() => ({}))
+        Object.entries(grouped).forEach(([key, values]) => {
+            const hash = String(key).split('').reduce((h, c) => h + c.charCodeAt(0), 0)
+            distributed[hash % this.numWorkers][key] = values
+        })
+
+        return distributed
+    }
+}
+
 // Shuffle and Sort phase: збирає, сортує, групує та розподіляє дані
 async function runShuffleAndSortPhase(mapWorkersWithResults, numWorkers) {
     // 1. Збираємо всі пари [key, value] від всіх Map-воркерів
@@ -223,14 +348,8 @@ async function runShuffleAndSortPhase(mapWorkersWithResults, numWorkers) {
                 } else if (typeof item === 'object' && item !== null) {
                     // Це об'єкт {key: value} - конвертуємо в пари
                     Object.entries(item).forEach(([key, value]) => {
-                        if (typeof value === 'number' && value > 0) {
-                            // Створюємо value пар [key, 1] для кожного входження
-                            for (let i = 0; i < value; i++) {
-                                allPairs.push([key, 1])
-                            }
-                        } else {
-                            allPairs.push([key, value])
-                        }
+                        // Просто додаємо пару [key, value] - групування обробить значення пізніше
+                        allPairs.push([key, value])
                     })
                 }
             })
