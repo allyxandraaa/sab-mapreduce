@@ -3,22 +3,27 @@ self.onmessage = async function(event) {
         const { phase, sharedBuffer, split, windowSize, memoryLimit } = event.data
 
         if (phase === 'divide') {
-            const tailedLength = split.tailedEnd - split.start
-            const splitView = new Uint8Array(sharedBuffer, split.start, tailedLength)
+            const { createSplitView } = await import('./splitter.js')
             
-            const { computeSPrefixes, filterSPrefixesByFrequency, sortSPrefixesByFrequency } = 
-                await import('../suffix-prefix/window.js')
+            const splitView = createSplitView(sharedBuffer, split)
             
-            const sPrefixes = computeSPrefixes(splitView, windowSize, memoryLimit)
-            const filtered = filterSPrefixesByFrequency(sPrefixes, 2)
-            const sorted = sortSPrefixesByFrequency(filtered)
+            const { computeSPrefixes } = await import('../suffix-prefix/sprefix.js')
+            
+            const sPrefixes = computeSPrefixes(
+                splitView,
+                split.start,
+                split.end,
+                split.tailedEnd,
+                windowSize,
+                event.data.targetPrefixes || null
+            )
             
             self.postMessage({
                 type: 'success',
                 phase: 'divide',
                 splitIndex: split.index,
                 result: {
-                    sPrefixes: sorted,
+                    sPrefixes: sPrefixes,
                     splitInfo: {
                         start: split.start,
                         end: split.end,

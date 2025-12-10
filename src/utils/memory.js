@@ -4,11 +4,11 @@ export function calculateMemoryLimit() {
     let Fm
     
     if (memoryLimit <= 2) {
-        Fm = 100000
+        Fm = 30
     } else if (memoryLimit <= 4) {
-        Fm = 300000
+        Fm = 50
     } else {
-        Fm = 1000000
+        Fm = 70
     }
     
     return Fm

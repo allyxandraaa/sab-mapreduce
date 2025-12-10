@@ -1,6 +1,3 @@
-// UI функції для відображення контенту DGST
-
-// Відображення інформації про файл
 export function displayFileInfo(element, fileName, fileSize) {
     element.innerHTML = `
         <strong>Файл:</strong> ${fileName}<br>
@@ -9,7 +6,6 @@ export function displayFileInfo(element, fileName, fileSize) {
     element.style.display = 'block'
 }
 
-// Відображення статистики DGST
 export function displayStats(stats) {
     const container = document.getElementById('stats-container')
     
@@ -52,7 +48,6 @@ export function displayStats(stats) {
     `
 }
 
-// Відображення результатів пошуку
 export function displaySearchResults(container, query, results) {
     if (!results || results.length === 0) {
         container.innerHTML = `
@@ -79,7 +74,6 @@ export function displaySearchResults(container, query, results) {
     container.style.display = 'block'
 }
 
-// Відображення статусу (loading, success, error)
 export function displayStatus(element, type, message) {
     if (!message) {
         element.innerHTML = ''
@@ -107,4 +101,49 @@ export function displayStatus(element, type, message) {
     element.innerHTML = `<div class="${className}">${icon} ${message}</div>`
 }
 
+export function displayPrefixes(container, prefixes) {
+    if (!prefixes || prefixes.length === 0) {
+        container.innerHTML = '<div class="loading">Префікси не знайдено</div>'
+        return
+    }
+
+    const sorted = [...prefixes].sort((a, b) => {
+        if (a.length !== b.length) return a.length - b.length
+        if (a.frequency !== b.frequency) return b.frequency - a.frequency
+        return a.prefix.localeCompare(b.prefix)
+    })
+
+    container.innerHTML = `
+        <div style="margin-bottom: 15px; font-weight: bold; color: #555; font-size: 16px;">
+            Всього префіксів: ${prefixes.length}
+        </div>
+        <div style="max-height: 600px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px; background: #f9f9f9;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: #e0e0e0; position: sticky; top: 0;">
+                        <th style="padding: 8px; text-align: left; border-bottom: 2px solid #999;">Префікс</th>
+                        <th style="padding: 8px; text-align: center; border-bottom: 2px solid #999;">Довжина</th>
+                        <th style="padding: 8px; text-align: right; border-bottom: 2px solid #999;">Частота</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sorted.map(sp => `
+                        <tr style="border-bottom: 1px solid #eee;">
+                            <td style="padding: 6px; font-family: monospace; font-size: 14px;">${escapeHtml(sp.prefix)}</td>
+                            <td style="padding: 6px; text-align: center;">${sp.length}</td>
+                            <td style="padding: 6px; text-align: right; font-weight: bold;">${sp.frequency}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `
+    container.style.display = 'block'
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div')
+    div.textContent = text
+    return div.innerHTML
+}
 

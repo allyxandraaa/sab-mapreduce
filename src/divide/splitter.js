@@ -1,4 +1,4 @@
-export function divideIntoSplits(buffer, sharedBuffer, config) {
+export function divideIntoSplits(buffer, config) {
     const splits = []
     const bufferLength = buffer.length
     const splitSize = Math.floor(bufferLength / config.numWorkers)
@@ -27,12 +27,6 @@ export function divideIntoSplits(buffer, sharedBuffer, config) {
 }
 
 export function createSplitView(sharedBuffer, split) {
-    return new Uint8Array(sharedBuffer, split.start, split.length)
+    const length = split.tailedEnd ? (split.tailedEnd - split.start) : split.length
+    return new Uint8Array(sharedBuffer, split.start, length)
 }
-
-export function calculateOptimalSplitSize(memoryLimit, numWorkers, bufferLength) {
-    const availablePerWorker = Math.floor(memoryLimit / (numWorkers * 2))
-    const splitSize = Math.floor(bufferLength / numWorkers)
-    return Math.min(splitSize, availablePerWorker)
-}
-

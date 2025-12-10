@@ -1,5 +1,5 @@
-import { readFileAsArrayBuffer } from './fileUtils.js'
-import { displayFileInfo, displayStats, displaySearchResults, displayStatus } from './ui.js'
+import { readFileAsArrayBuffer } from './utils/fileUtils.js'
+import { displayFileInfo, displayStats, displaySearchResults, displayStatus, displayPrefixes } from './ui/display.js'
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 
@@ -71,17 +71,15 @@ document.addEventListener('DOMContentLoaded', function () {
             await config.initialize(arrayBuffer.byteLength)
             
             displayStatus(buildStatus, 'loading', 'Розподіл на спліти...')
-            const splits = divideIntoSplits(view, sharedBuffer, config)
+            const splits = divideIntoSplits(view, config)
             console.log(`Створено ${splits.length} сплітів`, splits)
             
             displayStatus(buildStatus, 'loading', `Обчислення S-префіксів (${splits.length} сплітів)...`)
-            const sPrefixesResults = await computeSPrefixes(splits, config)
+            const allSPrefixes = await processIteratively(splits, config)
             
-            const allSPrefixes = []
             let totalSuffixes = 0
-            sPrefixesResults.forEach(result => {
-                allSPrefixes.push(...result.sPrefixes)
-                totalSuffixes += result.splitInfo.length
+            splits.forEach(split => {
+                totalSuffixes += split.length
             })
             
             const buildTime = (performance.now() - startTime) / 1000
@@ -97,7 +95,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             
             displayStatus(buildStatus, 'success', `DGST успішно побудовано за ${buildTime.toFixed(2)} сек!`)
-            displayStats(dgstTree)
+            displayPrefixes(document.getElementById('stats-container'), allSPrefixes)
             
             searchInput.disabled = false
             searchBtn.disabled = false
@@ -108,7 +106,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     })
     
-    async function computeSPrefixes(splits, config) {
+    async function runWorkers(splits, config, targetPrefixes = null) {
         const workers = []
         const promises = []
         
@@ -137,7 +135,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     sharedBuffer: sharedBuffer,
                     split: split,
                     windowSize: config.windowSize,
-                    memoryLimit: config.memoryLimit
+                    memoryLimit: config.memoryLimit,
+                    targetPrefixes: targetPrefixes ? Array.from(targetPrefixes) : null
                 })
                 
                 workers.push(worker)
@@ -148,6 +147,99 @@ document.addEventListener('DOMContentLoaded', function () {
         
         const results = await Promise.all(promises)
         return results
+    }
+    
+    async function processIteratively(splits, config) {
+        let windowSize = config.windowSize
+        let targetPrefixes = null 
+        let finalPrefixes = []
+    
+        while (true) {
+            config.windowSize = windowSize
+    
+            // 1. Оновлюємо хвости для нового вікна
+            const updatedSplits = splits.map(split => {
+                const tail = windowSize - 1
+                return {
+                    ...split,
+                    tailedEnd: Math.min(split.end + tail, sharedBuffer.byteLength)
+                }
+            })
+    
+            console.log(`Ітерація: windowSize=${windowSize}, шукаємо: ${targetPrefixes ? targetPrefixes.size + ' префіксів' : 'ВСІ'}, Fm=${config.memoryLimit}`)
+    
+             // 2. Запускаємо воркерів
+             // ВАЖЛИВО: Воркери мають знати, що якщо targetPrefixes != null,
+             // то вони ігнорують все, що не починається з цих префіксів.
+             const results = await runWorkers(updatedSplits, config, targetPrefixes)
+            
+            const { aggregateSPrefixes } = await import('./merge/shuffle.js')
+            const aggregated = aggregateSPrefixes(results)
+    
+            const globalMap = new Map()
+            aggregated.forEach(sp => {
+                globalMap.set(sp.prefix, sp.frequency)
+            })
+    
+            const nextRoundTargets = new Set()
+            let hasProblematic = false
+            let validCount = 0
+            let problematicCount = 0
+    
+            // 3. Сортуємо: Валідні -> у результат, Проблемні -> на наступне коло
+            for (const [prefix, count] of globalMap.entries()) {
+                if (count > config.memoryLimit) {
+                    // Це "товстий" префікс. Ми його НЕ додаємо у фінальний список.
+                    // Ми його уточнюватимемо в наступному раунді.
+                    nextRoundTargets.add(prefix)
+                    hasProblematic = true
+                    problematicCount++
+                } else {
+                    // Це "нормальний" префікс. Він готовий.
+                    // Записуємо і забуваємо про нього.
+                    finalPrefixes.push({ prefix, frequency: count, length: windowSize })
+                    validCount++
+                }
+            }
+    
+            console.log(`Результат ітерації: Валідних (+${validCount}), Проблемних (${problematicCount})`)
+    
+            // 4. Логіка переходу
+            if (!hasProblematic) {
+                // УСПІХ: Немає жодного префікса, що перевищує ліміт.
+                // Всі дані розбиті на шматки <= memoryLimit.
+                console.log(`Всі префікси успішно розбиті. Завершення.`)
+                break; 
+            }
+    
+            // Якщо є проблемні -> продовжуємо ТІЛЬКИ з ними
+            console.log(`Залишилось ${nextRoundTargets.size} великих префіксів. Поглиблюємо пошук...`)
+            
+            // Встановлюємо фільтр для наступного проходу
+            targetPrefixes = nextRoundTargets
+            
+            // Збільшуємо вікно (можна агресивніше, наприклад +2)
+            windowSize++ 
+    
+            // Hard Stop (запобіжник)
+            if (windowSize > 100) {
+                console.warn('Досягнуто максимальний розмір вікна! Примусово зберігаю великі префікси.')
+                // Додаємо ті, що залишилися, навіть якщо вони великі
+                for (const prefix of nextRoundTargets) {
+                     // Увага: frequency треба брати з globalMap, але він вже міг загубитися
+                     // Краще брати з попереднього кроку, або змиритися.
+                     // У вашому коді вище ви ітерували globalMap, тут можна так само:
+                }
+                 for (const [prefix, count] of globalMap.entries()) {
+                    if (count > config.memoryLimit) {
+                         finalPrefixes.push({ prefix, frequency: count, length: windowSize })
+                    }
+                }
+                break;
+            }
+        }
+    
+        return finalPrefixes
     }
 
     searchBtn.addEventListener('click', handleSearch)
