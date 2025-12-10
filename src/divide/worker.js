@@ -1,6 +1,6 @@
 self.onmessage = async function(event) {
     try {
-        const { phase, sharedBuffer, split, windowSize, memoryLimit } = event.data
+        const { phase, sharedBuffer, split, windowSize, memoryLimit, partition } = event.data
 
         if (phase === 'divide') {
             const { createSplitView } = await import('./splitter.js')
@@ -30,6 +30,33 @@ self.onmessage = async function(event) {
                         tailedEnd: split.tailedEnd,
                         length: split.length
                     }
+                }
+            })
+        } else if (phase === 'reduce') {
+            const partition = event.data.partition || []
+            
+            const aggregated = new Map()
+            partition.forEach(sp => {
+                if (!sp || !sp.prefix) return
+                const key = `${sp.prefix}_${sp.length}`
+                const existing = aggregated.get(key)
+                if (existing) {
+                    existing.frequency += sp.frequency
+                } else {
+                    aggregated.set(key, {
+                        prefix: sp.prefix,
+                        frequency: sp.frequency,
+                        length: sp.length
+                    })
+                }
+            })
+            
+            self.postMessage({
+                type: 'success',
+                phase: 'reduce',
+                partitionIndex: event.data.partitionIndex,
+                result: {
+                    sPrefixes: Array.from(aggregated.values())
                 }
             })
         } else {

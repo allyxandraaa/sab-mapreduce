@@ -106,7 +106,52 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     })
     
-    async function runWorkers(splits, config, targetPrefixes = null) {
+    async function runReduceWorkers(partitions) {
+        const workers = []
+        const promises = []
+        
+        for (let i = 0; i < partitions.length; i++) {
+            const partition = partitions[i]
+            if (partition.length === 0) {
+                promises.push(Promise.resolve({ sPrefixes: [] }))
+                continue
+            }
+            
+            const promise = new Promise((resolve, reject) => {
+                const worker = new Worker('src/divide/worker.js', { type: 'module' })
+                
+                worker.onmessage = (event) => {
+                    if (event.data.type === 'success') {
+                        resolve(event.data.result)
+                        worker.terminate()
+                    } else if (event.data.type === 'error') {
+                        reject(new Error(event.data.error))
+                        worker.terminate()
+                    }
+                }
+                
+                worker.onerror = (error) => {
+                    reject(error)
+                    worker.terminate()
+                }
+                
+                worker.postMessage({
+                    phase: 'reduce',
+                    partition: partition,
+                    partitionIndex: i
+                })
+                
+                workers.push(worker)
+            })
+            
+            promises.push(promise)
+        }
+        
+        const results = await Promise.all(promises)
+        return results
+    }
+    
+    async function runMapWorkers(splits, config, targetPrefixes = null) {
         const workers = []
         const promises = []
         
@@ -166,15 +211,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             })
     
-            console.log(`Ітерація: windowSize=${windowSize}, шукаємо: ${targetPrefixes ? targetPrefixes.size + ' префіксів' : 'ВСІ'}, Fm=${config.memoryLimit}`)
     
              // 2. Запускаємо воркерів
              // ВАЖЛИВО: Воркери мають знати, що якщо targetPrefixes != null,
              // то вони ігнорують все, що не починається з цих префіксів.
-             const results = await runWorkers(updatedSplits, config, targetPrefixes)
+             const mapResults = await runMapWorkers(updatedSplits, config, targetPrefixes)
             
-            const { aggregateSPrefixes } = await import('./merge/shuffle.js')
-            const aggregated = aggregateSPrefixes(results)
+            const { shuffleByKey, mergeReduceResults } = await import('./merge/shuffle.js')
+            
+            const shuffledPartitions = shuffleByKey(mapResults, config.numWorkers)
+            const reduceResults = await runReduceWorkers(shuffledPartitions)
+            const aggregated = mergeReduceResults(reduceResults)
     
             const globalMap = new Map()
             aggregated.forEach(sp => {
@@ -202,18 +249,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             }
     
-            console.log(`Результат ітерації: Валідних (+${validCount}), Проблемних (${problematicCount})`)
     
             // 4. Логіка переходу
             if (!hasProblematic) {
                 // УСПІХ: Немає жодного префікса, що перевищує ліміт.
                 // Всі дані розбиті на шматки <= memoryLimit.
-                console.log(`Всі префікси успішно розбиті. Завершення.`)
                 break; 
             }
     
             // Якщо є проблемні -> продовжуємо ТІЛЬКИ з ними
-            console.log(`Залишилось ${nextRoundTargets.size} великих префіксів. Поглиблюємо пошук...`)
             
             // Встановлюємо фільтр для наступного проходу
             targetPrefixes = nextRoundTargets
@@ -253,9 +297,12 @@ document.addEventListener('DOMContentLoaded', function () {
         currentFile = file
         const fileSize = (file.size / 1024).toFixed(2)
         displayFileInfo(fileInfo, file.name, fileSize)
-        buildBtn.disabled = false
         
+        buildBtn.disabled = false
         dgstTree = null
+        sharedBuffer = null
+        config = null
+        
         searchInput.disabled = true
         searchBtn.disabled = true
         searchResults.style.display = 'none'
