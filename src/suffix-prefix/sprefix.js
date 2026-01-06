@@ -1,3 +1,5 @@
+const decoder = new TextDecoder('utf-8')
+
 export function computeSPrefixes(splitView, start, end, tailedEnd, windowSize, targetPrefixes) {
     const localCounts = new Map()
     const effectiveEnd = end - start
@@ -6,9 +8,19 @@ export function computeSPrefixes(splitView, start, end, tailedEnd, windowSize, t
     for (let i = 0; i < effectiveEnd; i++) {
         if (i + windowSize > effectiveTailedEnd) break
         
-        const prefix = extractPrefix(splitView, i, windowSize)
+        const slice = splitView.subarray(i, i + windowSize)
         
-        if (prefix.includes('\n') || prefix.includes('\r')) continue
+        let hasNewline = false
+        for (let j = 0; j < slice.length; j++) {
+            if (slice[j] === 0x0A || slice[j] === 0x0D) {
+                hasNewline = true
+                break
+            }
+        }
+        if (hasNewline) continue
+        
+        const copy = new Uint8Array(slice)
+        const prefix = decoder.decode(copy)
         
         if (targetPrefixes && targetPrefixes.length > 0) {
             const matches = targetPrefixes.some(target => prefix.startsWith(target))
@@ -28,13 +40,6 @@ export function computeSPrefixes(splitView, start, end, tailedEnd, windowSize, t
     }
     
     return result
-}
-
-function extractPrefix(split, start, length) {
-    const slice = split.subarray(start, start + length)
-    const copy = new Uint8Array(slice)
-    const decoder = new TextDecoder('utf-8')
-    return decoder.decode(copy)
 }
 
 export function filterSPrefixesByFrequency(sPrefixes, minFrequency = 2) {

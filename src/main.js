@@ -2,6 +2,7 @@ import { readFileAsArrayBuffer } from './utils/fileUtils.js'
 import { displayFileInfo, displayStats, displaySearchResults, displayStatus, displayPrefixes } from './ui/display.js'
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
+import { buildSubTrees } from './subtree/builder.js'
 
 let dgstTree = null
 let currentFile = null
@@ -70,12 +71,27 @@ document.addEventListener('DOMContentLoaded', function () {
             })
             await config.initialize(arrayBuffer.byteLength)
             
+            initializeWorkerPool(config.numWorkers)
+            
             displayStatus(buildStatus, 'loading', 'Розподіл на спліти...')
             const splits = divideIntoSplits(view, config)
             console.log(`Створено ${splits.length} сплітів`, splits)
             
             displayStatus(buildStatus, 'loading', `Обчислення S-префіксів (${splits.length} сплітів)...`)
             const allSPrefixes = await processIteratively(splits, config)
+
+            displayStatus(buildStatus, 'loading', 'Групування та побудова піддерев...')
+            let subTreeResult = { groups: [], rounds: [], subTrees: [] }
+            try {
+                subTreeResult = await buildSubTrees({
+                    sharedBuffer,
+                    sPrefixes: allSPrefixes,
+                    config,
+                    executeRound: runSubTreeRound
+                })
+            } catch (subTreeError) {
+                console.warn('Не вдалося побудувати всі піддерева:', subTreeError)
+            }
             
             let totalSuffixes = 0
             splits.forEach(split => {
@@ -91,7 +107,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 totalSuffixes: totalSuffixes,
                 buildTime: buildTime,
                 sPrefixes: allSPrefixes,
-                splits: splits.length
+                splits: splits.length,
+                subTrees: subTreeResult.subTrees,
+                subTreeGroups: subTreeResult.groups.length,
+                subTreeRounds: subTreeResult.rounds.length
             }
             
             displayStatus(buildStatus, 'success', `DGST успішно побудовано за ${buildTime.toFixed(2)} сек!`)
@@ -99,6 +118,7 @@ document.addEventListener('DOMContentLoaded', function () {
             
             searchInput.disabled = false
             searchBtn.disabled = false
+            buildBtn.disabled = false
         } catch (error) {
             console.error("Помилка при побудові DGST:", error)
             displayStatus(buildStatus, 'error', `Помилка: ${error.message}`)
@@ -107,7 +127,10 @@ document.addEventListener('DOMContentLoaded', function () {
     })
     
     async function runReduceWorkers(partitions) {
-        const workers = []
+        if (workerPool.length === 0) {
+            initializeWorkerPool(partitions.length)
+        }
+        
         const promises = []
         
         for (let i = 0; i < partitions.length; i++) {
@@ -117,31 +140,34 @@ document.addEventListener('DOMContentLoaded', function () {
                 continue
             }
             
+            const worker = workerPool[i % workerPool.length]
+            
             const promise = new Promise((resolve, reject) => {
-                const worker = new Worker('src/divide/worker.js', { type: 'module' })
-                
-                worker.onmessage = (event) => {
+                const handler = (event) => {
+                    worker.removeEventListener('message', handler)
+                    worker.removeEventListener('error', errorHandler)
+                    
                     if (event.data.type === 'success') {
                         resolve(event.data.result)
-                        worker.terminate()
                     } else if (event.data.type === 'error') {
                         reject(new Error(event.data.error))
-                        worker.terminate()
                     }
                 }
                 
-                worker.onerror = (error) => {
+                const errorHandler = (error) => {
+                    worker.removeEventListener('message', handler)
+                    worker.removeEventListener('error', errorHandler)
                     reject(error)
-                    worker.terminate()
                 }
+                
+                worker.addEventListener('message', handler)
+                worker.addEventListener('error', errorHandler)
                 
                 worker.postMessage({
                     phase: 'reduce',
                     partition: partition,
                     partitionIndex: i
                 })
-                
-                workers.push(worker)
             })
             
             promises.push(promise)
@@ -151,29 +177,115 @@ document.addEventListener('DOMContentLoaded', function () {
         return results
     }
     
+    async function runSubTreeRound(groups) {
+        if (!Array.isArray(groups) || groups.length === 0) {
+            return []
+        }
+
+        if (!sharedBuffer) {
+            throw new Error('SharedArrayBuffer недоступний для побудови піддерев')
+        }
+
+        if (!config) {
+            throw new Error('Конфігурація відсутня для побудови піддерев')
+        }
+
+        if (workerPool.length !== config.numWorkers) {
+            initializeWorkerPool(config.numWorkers)
+        }
+
+        if (groups.length > workerPool.length) {
+            throw new Error(`Груп у раунді (${groups.length}) більше, ніж воркерів (${workerPool.length})`)
+        }
+
+        const promises = groups.map((group, index) => {
+            if (!group || group.prefixes.length === 0) {
+                return Promise.resolve(null)
+            }
+
+            const worker = workerPool[index]
+
+            return new Promise((resolve, reject) => {
+                const handler = (event) => {
+                    worker.removeEventListener('message', handler)
+                    worker.removeEventListener('error', errorHandler)
+
+                    if (event.data.type === 'success' && event.data.phase === 'subtree') {
+                        resolve(event.data.result)
+                    } else if (event.data.type === 'error') {
+                        reject(new Error(event.data.error))
+                    } else {
+                        resolve(null)
+                    }
+                }
+
+                const errorHandler = (error) => {
+                    worker.removeEventListener('message', handler)
+                    worker.removeEventListener('error', errorHandler)
+                    reject(error)
+                }
+
+                worker.addEventListener('message', handler)
+                worker.addEventListener('error', errorHandler)
+
+                worker.postMessage({
+                    phase: 'subtree',
+                    sharedBuffer,
+                    group
+                })
+            })
+        })
+
+        return Promise.all(promises)
+    }
+    
+    let workerPool = []
+    
+    function initializeWorkerPool(numWorkers) {
+        workerPool.forEach(w => w.terminate())
+        workerPool = []
+        
+        for (let i = 0; i < numWorkers; i++) {
+            const worker = new Worker('src/divide/worker.js', { type: 'module' })
+            workerPool.push(worker)
+        }
+    }
+    
     async function runMapWorkers(splits, config, targetPrefixes = null) {
-        const workers = []
+        if (workerPool.length !== config.numWorkers || splits.length !== config.numWorkers) {
+            initializeWorkerPool(config.numWorkers)
+        }
+        
+        if (splits.length !== workerPool.length) {
+            throw new Error(`Кількість сплітів (${splits.length}) не відповідає кількості воркерів (${workerPool.length})`)
+        }
+        
         const promises = []
         
         for (let i = 0; i < splits.length; i++) {
             const split = splits[i]
+            const worker = workerPool[i]
+            
             const promise = new Promise((resolve, reject) => {
-                const worker = new Worker('src/divide/worker.js', { type: 'module' })
-                
-                worker.onmessage = (event) => {
+                const handler = (event) => {
+                    worker.removeEventListener('message', handler)
+                    worker.removeEventListener('error', errorHandler)
+                    
                     if (event.data.type === 'success') {
                         resolve(event.data.result)
-                        worker.terminate()
                     } else if (event.data.type === 'error') {
                         reject(new Error(event.data.error))
-                        worker.terminate()
                     }
                 }
                 
-                worker.onerror = (error) => {
+                const errorHandler = (error) => {
+                    worker.removeEventListener('message', handler)
+                    worker.removeEventListener('error', errorHandler)
                     reject(error)
-                    worker.terminate()
                 }
+                
+                worker.addEventListener('message', handler)
+                worker.addEventListener('error', errorHandler)
                 
                 worker.postMessage({
                     phase: 'divide',
@@ -183,8 +295,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     memoryLimit: config.memoryLimit,
                     targetPrefixes: targetPrefixes ? Array.from(targetPrefixes) : null
                 })
-                
-                workers.push(worker)
             })
             
             promises.push(promise)
@@ -252,34 +362,21 @@ document.addEventListener('DOMContentLoaded', function () {
     
             // 4. Логіка переходу
             if (!hasProblematic) {
-                // УСПІХ: Немає жодного префікса, що перевищує ліміт.
-                // Всі дані розбиті на шматки <= memoryLimit.
-                break; 
+                break
             }
-    
-            // Якщо є проблемні -> продовжуємо ТІЛЬКИ з ними
-            
-            // Встановлюємо фільтр для наступного проходу
             targetPrefixes = nextRoundTargets
-            
-            // Збільшуємо вікно (можна агресивніше, наприклад +2)
             windowSize++ 
     
             // Hard Stop (запобіжник)
             if (windowSize > 100) {
                 console.warn('Досягнуто максимальний розмір вікна! Примусово зберігаю великі префікси.')
-                // Додаємо ті, що залишилися, навіть якщо вони великі
-                for (const prefix of nextRoundTargets) {
-                     // Увага: frequency треба брати з globalMap, але він вже міг загубитися
-                     // Краще брати з попереднього кроку, або змиритися.
-                     // У вашому коді вище ви ітерували globalMap, тут можна так само:
-                }
+
                  for (const [prefix, count] of globalMap.entries()) {
                     if (count > config.memoryLimit) {
                          finalPrefixes.push({ prefix, frequency: count, length: windowSize })
                     }
                 }
-                break;
+                break
             }
         }
     

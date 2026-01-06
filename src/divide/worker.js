@@ -1,13 +1,13 @@
-self.onmessage = async function(event) {
+import { createSplitView } from './splitter.js'
+import { computeSPrefixes } from '../suffix-prefix/sprefix.js'
+import { decodeSharedBuffer, buildGroupSubTrees } from '../subtree/helpers.js'
+
+self.onmessage = function(event) {
     try {
-        const { phase, sharedBuffer, split, windowSize, memoryLimit, partition } = event.data
+        const { phase, sharedBuffer, split, windowSize, partition, group } = event.data
 
         if (phase === 'divide') {
-            const { createSplitView } = await import('./splitter.js')
-            
             const splitView = createSplitView(sharedBuffer, split)
-            
-            const { computeSPrefixes } = await import('../suffix-prefix/sprefix.js')
             
             const sPrefixes = computeSPrefixes(
                 splitView,
@@ -33,10 +33,10 @@ self.onmessage = async function(event) {
                 }
             })
         } else if (phase === 'reduce') {
-            const partition = event.data.partition || []
+            const partitionData = partition || []
             
             const aggregated = new Map()
-            partition.forEach(sp => {
+            partitionData.forEach(sp => {
                 if (!sp || !sp.prefix) return
                 const key = `${sp.prefix}_${sp.length}`
                 const existing = aggregated.get(key)
@@ -57,6 +57,25 @@ self.onmessage = async function(event) {
                 partitionIndex: event.data.partitionIndex,
                 result: {
                     sPrefixes: Array.from(aggregated.values())
+                }
+            })
+        } else if (phase === 'subtree') {
+            if (!sharedBuffer || !group) {
+                throw new Error('Відсутні дані для побудови піддерева')
+            }
+
+            const text = decodeSharedBuffer(sharedBuffer)
+            const trees = buildGroupSubTrees(text, group)
+
+            self.postMessage({
+                type: 'success',
+                phase: 'subtree',
+                groupId: group.id,
+                result: {
+                    groupId: group.id,
+                    totalFrequency: group.totalFrequency,
+                    treeCount: trees.length,
+                    trees
                 }
             })
         } else {

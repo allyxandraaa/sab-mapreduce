@@ -8,14 +8,14 @@ export class DGSTConfig {
         this.maxSubTreeSize = options.maxSubTreeSize || 1000
     }
     
-    async initialize(fileSize) {
+    async initialize() {
         const { calculateMemoryLimit } = await import('../utils/memory.js')
         
-        if (this.memoryLimit === null) {
-            this.memoryLimit = calculateMemoryLimit()
-        }
+        this.numWorkers = Math.max(1, this.numWorkers)
         
-        this.numWorkers = Math.max(1, Math.min(8, this.numWorkers))
+        if (this.memoryLimit === null) {
+            this.memoryLimit = calculateMemoryLimit(this.numWorkers)
+        }
         
         const splitSize = Math.floor(this.memoryLimit / (this.numWorkers * 2))
         this.maxSplitSize = Math.min(this.maxSplitSize, splitSize)
