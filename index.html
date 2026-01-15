@@ -13,7 +13,6 @@
             <h1>🌳 MapReduce-based DGST - Distributed Generalized Suffix Tree</h1>
         
         <div class="container">
-            <!-- Ліва колонка: Завантаження та побудова -->
             <div class="section">
                 <h2>Завантаження файлу</h2>
                 <label class="file-upload" id="file-upload-area" for="file-input">
@@ -31,11 +30,27 @@
                 <div id="build-status"></div>
             </div>
 
-            <!-- Права колонка: Статистика -->
             <div class="section">
-                <h2>Статистика DGST</h2>
+                <h2>Статистика побудови</h2>
                 <div id="stats-container">
                     <div class="loading">Завантажте файл для побудови дерева</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section section-spaced">
+            <h2>Побудовані піддерева</h2>
+            <div class="subtrees-visualization-panel">
+                <div class="subtree-nav">
+                    <button id="subtree-prev" class="subtree-nav-btn" disabled>← Попередня</button>
+                    <div class="subtree-nav-label">
+                        <span id="subtree-current-index">1</span>/<span id="subtree-total-count">1</span>
+                    </div>
+                    <button id="subtree-next" class="subtree-nav-btn" disabled>Наступна →</button>
+                </div>
+                <div class="subtrees-visualization-header">Візуалізація піддерев</div>
+                <div id="subtrees-visualization" class="subtrees-visualization-canvas">
+                    <div class="loading">Очікуємо результати піддерев</div>
                 </div>
             </div>
         </div>

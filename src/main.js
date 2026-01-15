@@ -1,5 +1,5 @@
 import { readFileAsArrayBuffer } from './utils/fileUtils.js'
-import { displayFileInfo, displayStats, displayStatus, displaySuffixTree } from './ui/display.js'
+import { displayFileInfo, displayStatus, displaySubTreeVisualization, displayStats } from './ui/display.js'
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 import { buildSubTrees } from './subtree/builder.js'
@@ -8,6 +8,8 @@ let dgstTree = null
 let currentFile = null
 let sharedBuffer = null
 let config = null
+const textDecoder = new TextDecoder('utf-8')
+let decodedText = ''
 
 document.addEventListener('DOMContentLoaded', function () {
     const fileInput = document.getElementById('file-input')
@@ -16,6 +18,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const buildBtn = document.getElementById('build-dgst-btn')
     const buildStatus = document.getElementById('build-status')
     const numWorkersInput = document.getElementById('num-workers')
+    const subtreeCanvas = document.getElementById('subtrees-visualization')
+    const navPrevBtn = document.getElementById('subtree-prev')
+    const navNextBtn = document.getElementById('subtree-next')
+    const navCurrentLabel = document.getElementById('subtree-current-index')
+    const navTotalLabel = document.getElementById('subtree-total-count')
 
     fileUploadArea.addEventListener('dragover', (e) => {
         e.preventDefault()
@@ -41,6 +48,61 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     })
 
+    let latestSubTreeResult = null
+    let currentGroupIndex = 0
+
+    const renderCurrentGroup = () => {
+        if (!latestSubTreeResult || !Array.isArray(latestSubTreeResult.subTrees) || !subtreeCanvas) {
+            return
+        }
+        const groups = latestSubTreeResult.subTrees
+        const safeIndex = Math.min(Math.max(currentGroupIndex, 0), Math.max(groups.length - 1, 0))
+        currentGroupIndex = safeIndex
+        const selectedGroup = groups[safeIndex]
+        const displayGroup = {
+            ...selectedGroup,
+            displayIndex: safeIndex + 1
+        }
+        displaySubTreeVisualization([displayGroup], subtreeCanvas, decodedText)
+
+        if (navCurrentLabel) {
+            navCurrentLabel.textContent = String(groups.length ? safeIndex + 1 : 0)
+        }
+        if (navTotalLabel) {
+            navTotalLabel.textContent = String(Math.max(groups.length, 1))
+        }
+        if (navPrevBtn) {
+            navPrevBtn.disabled = groups.length <= 1 || safeIndex === 0
+        }
+        if (navNextBtn) {
+            navNextBtn.disabled = groups.length <= 1 || safeIndex >= groups.length - 1
+        }
+    }
+
+    if (navPrevBtn) {
+        navPrevBtn.addEventListener('click', () => {
+            if (!latestSubTreeResult || currentGroupIndex === 0) {
+                return
+            }
+            currentGroupIndex -= 1
+            renderCurrentGroup()
+        })
+    }
+
+    if (navNextBtn) {
+        navNextBtn.addEventListener('click', () => {
+            if (!latestSubTreeResult) {
+                return
+            }
+            const maxIndex = latestSubTreeResult.subTrees.length - 1
+            if (currentGroupIndex >= maxIndex) {
+                return
+            }
+            currentGroupIndex += 1
+            renderCurrentGroup()
+        })
+    }
+
     buildBtn.addEventListener('click', async function () {
         if (!currentFile) {
             alert('Файл не вибрано')
@@ -55,9 +117,11 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
             displayStatus(buildStatus, 'loading', 'Завантаження файлу...')
             const arrayBuffer = await readFileAsArrayBuffer(currentFile)
+            const fileBytes = new Uint8Array(arrayBuffer)
             sharedBuffer = new SharedArrayBuffer(arrayBuffer.byteLength)
             const view = new Uint8Array(sharedBuffer)
-            view.set(new Uint8Array(arrayBuffer))
+            view.set(fileBytes)
+            decodedText = textDecoder.decode(fileBytes)
             
             displayStatus(buildStatus, 'loading', 'Ініціалізація конфігурації...')
             const numWorkers = parseInt(numWorkersInput.value) || 4
@@ -99,42 +163,8 @@ document.addEventListener('DOMContentLoaded', function () {
             })
 
             const buildTime = (performance.now() - startTime) / 1000
-            
-            let globalSuffixTree = null
             const suffixSubtrees = Array.isArray(subTreeResult.suffixSubtrees) ? subTreeResult.suffixSubtrees : []
-
-            if (suffixSubtrees.length > 0) {
-                displayStatus(buildStatus, 'loading', 'Побудова глобального суфіксного дерева...')
-                try {
-                    console.time('[GlobalTree] worker-build')
-                    globalSuffixTree = await buildGlobalTreeInWorker(sharedBuffer, suffixSubtrees, (progressEvent) => {
-                        if (!progressEvent || progressEvent.phase !== 'global-tree') {
-                            return
-                        }
-
-                        const stageLabel = {
-                            start: 'Підготовка даних для глобального дерева...',
-                            decoded: 'Декодування тексту завершено, створюємо масив суфіксів...',
-                            'build-complete': 'Фіналізуємо глобальне дерево...'
-                        }[progressEvent.stage]
-
-                        if (stageLabel) {
-                            displayStatus(buildStatus, 'loading', stageLabel)
-                        }
-
-                        console.info('[GlobalTree][Worker]', progressEvent.stage, progressEvent.meta || {})
-                    })
-                    console.timeEnd('[GlobalTree] worker-build')
-                } catch (globalTreeError) {
-                    console.error('Не вдалося побудувати глобальне суфіксне дерево:', globalTreeError)
-                    displayStatus(buildStatus, 'error', `Помилка глобального дерева: ${globalTreeError.message || globalTreeError}`)
-                    buildBtn.disabled = false
-                    return
-                }
-            }
-
-            const resolvedSuffixCount = globalSuffixTree?.suffixCount || fallbackTotalSuffixes
-            const globalSuffixes = globalSuffixTree?.suffixes || []
+            const resolvedSuffixCount = suffixSubtrees.reduce((sum, tree) => sum + (tree?.suffixCount || 0), 0) || fallbackTotalSuffixes
 
             dgstTree = {
                 totalNodes: allSPrefixes.length,
@@ -147,15 +177,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 subTrees: subTreeResult.subTrees,
                 subTreeGroups: subTreeResult.groups.length,
                 subTreeRounds: subTreeResult.rounds.length,
-                globalTree: globalSuffixTree,
-                globalSuffixes
+                suffixSubtrees
             }
             
+            latestSubTreeResult = subTreeResult
+            displayStats(dgstTree)
+            currentGroupIndex = 0
+            renderCurrentGroup()
+
             displayStatus(buildStatus, 'success', `DGST успішно побудовано за ${buildTime.toFixed(2)} сек!`)
-            console.time('[GlobalTree] render-display')
-            displaySuffixTree(document.getElementById('stats-container'), globalSuffixTree)
-            console.timeEnd('[GlobalTree] render-display')
-            
             buildBtn.disabled = false
             console.info('[Build] Побудову завершено, кнопка увімкнена')
         } catch (error) {
@@ -306,60 +336,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return roundResults
     }
 
-    async function buildGlobalTreeInWorker(sharedBuffer, suffixSubtrees, onProgress) {
-        if (!sharedBuffer) {
-            throw new Error('SharedArrayBuffer недоступний для глобального дерева')
-        }
-
-        if (!Array.isArray(suffixSubtrees) || suffixSubtrees.length === 0) {
-            return null
-        }
-
-        return new Promise((resolve, reject) => {
-            const worker = new Worker('src/divide/worker.js', { type: 'module' })
-
-            const cleanup = () => {
-                worker.removeEventListener('message', messageHandler)
-                worker.removeEventListener('error', errorHandler)
-                worker.terminate()
-            }
-
-            const messageHandler = (event) => {
-                const data = event.data
-                if (!data) {
-                    return
-                }
-
-                if (data.type === 'progress' && data.phase === 'global-tree') {
-                    onProgress?.(data)
-                    return
-                }
-
-                if (data.type === 'success' && data.phase === 'global-tree') {
-                    cleanup()
-                    resolve(data.result)
-                } else if (data.type === 'error') {
-                    cleanup()
-                    reject(new Error(data.error))
-                }
-            }
-
-            const errorHandler = (error) => {
-                cleanup()
-                reject(error)
-            }
-
-            worker.addEventListener('message', messageHandler)
-            worker.addEventListener('error', errorHandler)
-
-            worker.postMessage({
-                phase: 'global-tree',
-                sharedBuffer,
-                suffixSubtrees
-            })
-        })
-    }
-
     let workerPool = []
     
     function initializeWorkerPool(numWorkers) {
@@ -485,7 +461,17 @@ document.addEventListener('DOMContentLoaded', function () {
         dgstTree = null
         sharedBuffer = null
         config = null
+        decodedText = ''
+        latestSubTreeResult = null
+        currentGroupIndex = 0
         displayStats(null)
+        if (subtreeCanvas) {
+            subtreeCanvas.innerHTML = '<div class="loading">Очікуємо результати піддерев</div>'
+        }
+        if (navPrevBtn) navPrevBtn.disabled = true
+        if (navNextBtn) navNextBtn.disabled = true
+        if (navCurrentLabel) navCurrentLabel.textContent = '0'
+        if (navTotalLabel) navTotalLabel.textContent = '1'
         displayStatus(buildStatus, null, '')
     }
 })
