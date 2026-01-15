@@ -1,9 +1,8 @@
 import { readFileAsArrayBuffer } from './utils/fileUtils.js'
-import { displayFileInfo, displayStats, displaySearchResults, displayStatus, displaySuffixTree } from './ui/display.js'
+import { displayFileInfo, displayStats, displayStatus, displaySuffixTree } from './ui/display.js'
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 import { buildSubTrees } from './subtree/builder.js'
-import { searchInSuffixTree } from './search/searchTree.js'
 
 let dgstTree = null
 let currentFile = null
@@ -17,9 +16,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const buildBtn = document.getElementById('build-dgst-btn')
     const buildStatus = document.getElementById('build-status')
     const numWorkersInput = document.getElementById('num-workers')
-    const searchInput = document.getElementById('search-input')
-    const searchBtn = document.getElementById('search-btn')
-    const searchResults = document.getElementById('search-results')
 
     fileUploadArea.addEventListener('dragover', (e) => {
         e.preventDefault()
@@ -160,8 +156,6 @@ document.addEventListener('DOMContentLoaded', function () {
             displaySuffixTree(document.getElementById('stats-container'), globalSuffixTree)
             console.timeEnd('[GlobalTree] render-display')
             
-            searchInput.disabled = false
-            searchBtn.disabled = false
             buildBtn.disabled = false
             console.info('[Build] Побудову завершено, кнопка увімкнена')
         } catch (error) {
@@ -480,13 +474,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return finalPrefixes
     }
 
-    searchBtn.addEventListener('click', handleSearch)
-    searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleSearch()
-        }
-    })
-
     async function handleFileSelect(file) {
         currentFile = file
         console.info('[Build] handleFileSelect отримав файл', { name: file.name, size: file.size })
@@ -498,26 +485,7 @@ document.addEventListener('DOMContentLoaded', function () {
         dgstTree = null
         sharedBuffer = null
         config = null
-        
-        searchInput.disabled = true
-        searchBtn.disabled = true
-    }
-
-    async function handleSearch() {
-        if (!dgstTree) {
-            alert('DGST не побудовано')
-            return
-        }
-
-        const query = searchInput.value
-        const searchResultsContainer = document.getElementById('search-results')
-        searchResultsContainer.innerHTML = ''
-
-        const searchResult = await searchInSuffixTree(dgstTree.globalTree, query)
-        if (searchResult) {
-            displaySearchResults(searchResultsContainer, searchResult)
-        } else {
-            searchResultsContainer.innerHTML = 'Результата не знайдено'
-        }
+        displayStats(null)
+        displayStatus(buildStatus, null, '')
     }
 })
