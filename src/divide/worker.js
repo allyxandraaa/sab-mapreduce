@@ -65,7 +65,7 @@ self.onmessage = function(event) {
             }
 
             const text = decodeSharedBuffer(sharedBuffer)
-            const trees = buildGroupSubTrees(text, group)
+            const { prefixTrees, groupTree } = buildGroupSubTrees(text, group)
 
             self.postMessage({
                 type: 'success',
@@ -74,8 +74,9 @@ self.onmessage = function(event) {
                 result: {
                     groupId: group.id,
                     totalFrequency: group.totalFrequency,
-                    treeCount: trees.length,
-                    trees
+                    treeCount: prefixTrees.length,
+                    prefixTrees,
+                    groupTree
                 }
             })
         } else {

@@ -1,10 +1,76 @@
 const decoder = new TextDecoder('utf-8')
 
+const ROOT_META = {
+    type: 'root'
+}
+
+function createEmptyTree(meta = {}) {
+    return {
+        nodes: [{ id: 0, depth: 0, ...ROOT_META, ...meta }],
+        edges: []
+    }
+}
+
+export function mergeTreeStructures(trees, rootMeta = {}) {
+    if (!Array.isArray(trees) || trees.length === 0) {
+        return createEmptyTree(rootMeta)
+    }
+
+    const mergedNodes = [{ id: 0, depth: 0, ...ROOT_META, ...rootMeta }]
+    const mergedEdges = []
+    let nextNodeId = 1
+
+    trees.forEach(tree => {
+        if (!tree || !Array.isArray(tree.nodes) || tree.nodes.length === 0) {
+            return
+        }
+
+        const idMap = new Map()
+        tree.nodes.forEach(node => {
+            if (node.id === 0) {
+                idMap.set(0, 0)
+                return
+            }
+            const newId = nextNodeId++
+            mergedNodes.push({ ...node, id: newId })
+            idMap.set(node.id, newId)
+        })
+
+        if (!Array.isArray(tree.edges)) {
+            return
+        }
+
+        tree.edges.forEach(edge => {
+            const from = idMap.get(edge.from)
+            const to = idMap.get(edge.to)
+            if (from === undefined || to === undefined) {
+                return
+            }
+            mergedEdges.push({ ...edge, from, to })
+        })
+    })
+
+    return {
+        nodes: mergedNodes,
+        edges: mergedEdges
+    }
+}
+
 export function buildGroupSubTrees(text, group) {
     if (!group || !Array.isArray(group.prefixes)) {
-        return []
+        return {
+            prefixTrees: [],
+            groupTree: createEmptyTree({ type: 'group-root', groupId: group?.id ?? null })
+        }
     }
-    return group.prefixes.map(prefixInfo => buildSubTreeForPrefix(text, prefixInfo))
+
+    const prefixTrees = group.prefixes.map(prefixInfo => buildSubTreeForPrefix(text, prefixInfo))
+    const groupTree = mergeTreeStructures(prefixTrees, { type: 'group-root', groupId: group.id })
+
+    return {
+        prefixTrees,
+        groupTree
+    }
 }
 
 export function buildSubTreeForPrefix(text, prefixInfo) {
@@ -102,42 +168,120 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray) {
         return { nodes: [], edges: [] }
     }
 
-    const nodes = [{ id: 0, depth: 0 }]
+    const nodes = [{ id: 0, depth: 0, type: 'root' }]
     const edges = []
-    const stack = [{ nodeId: 0, depth: 0 }]
+    let nextNodeId = 1
 
-    const createEdge = (from, to, start, end) => {
-        edges.push({
-            from,
-            to,
-            start,
-            end,
-            labelPreview: text.slice(start, Math.min(end, start + 32))
+    const children = new Map()
+    children.set(0, new Map())
+
+    const getOrCreateChild = (parentId, parentDepth, char, targetDepth, suffixPos) => {
+        const parentChildren = children.get(parentId)
+        
+        if (parentChildren.has(char)) {
+            return parentChildren.get(char)
+        }
+
+        const nodeId = nextNodeId++
+        const isLeaf = targetDepth === text.length - suffixPos
+        nodes.push({ 
+            id: nodeId, 
+            depth: targetDepth, 
+            type: isLeaf ? 'leaf' : 'internal',
+            ...(isLeaf ? { suffixStart: suffixPos } : {})
         })
+        
+        edges.push({
+            from: parentId,
+            to: nodeId,
+            start: suffixPos + parentDepth,
+            end: suffixPos + targetDepth,
+            labelPreview: text.slice(suffixPos + parentDepth, Math.min(suffixPos + targetDepth, suffixPos + parentDepth + 32))
+        })
+        
+        parentChildren.set(char, { nodeId, depth: targetDepth })
+        children.set(nodeId, new Map())
+        
+        return { nodeId, depth: targetDepth }
     }
 
-    suffixArray.forEach((suffixStart, index) => {
-        const lcp = index === 0 ? 0 : lcpArray[index - 1]
+    const splitEdge = (parentId, parentDepth, existingChild, splitDepth, suffixPos) => {
+        const internalId = nextNodeId++
+        nodes.push({ id: internalId, depth: splitDepth, type: 'internal' })
+        children.set(internalId, new Map())
 
-        while (stack.length > 0 && stack[stack.length - 1].depth > lcp) {
-            stack.pop()
+        const edgeIndex = edges.findIndex(e => e.from === parentId && e.to === existingChild.nodeId)
+        if (edgeIndex !== -1) {
+            const oldEdge = edges[edgeIndex]
+            const oldStart = oldEdge.start
+            
+            oldEdge.to = internalId
+            oldEdge.end = oldStart + (splitDepth - parentDepth)
+            oldEdge.labelPreview = text.slice(oldEdge.start, Math.min(oldEdge.end, oldEdge.start + 32))
+
+            const continueChar = text.charAt(oldStart + (splitDepth - parentDepth))
+            children.get(internalId).set(continueChar, existingChild)
+
+            edges.push({
+                from: internalId,
+                to: existingChild.nodeId,
+                start: oldStart + (splitDepth - parentDepth),
+                end: oldStart + (existingChild.depth - parentDepth),
+                labelPreview: text.slice(oldStart + (splitDepth - parentDepth), Math.min(oldStart + (existingChild.depth - parentDepth), oldStart + (splitDepth - parentDepth) + 32))
+            })
         }
 
-        let top = stack[stack.length - 1]
-        if (top.depth < lcp) {
-            const internalId = nodes.length
-            nodes.push({ id: internalId, depth: lcp })
-            createEdge(top.nodeId, internalId, suffixStart + top.depth, suffixStart + lcp)
-            top = { nodeId: internalId, depth: lcp }
-            stack.push(top)
+        const parentChildren = children.get(parentId)
+        const charToUpdate = text.charAt(suffixPos + parentDepth)
+        parentChildren.set(charToUpdate, { nodeId: internalId, depth: splitDepth })
+
+        return { nodeId: internalId, depth: splitDepth }
+    }
+
+    for (let i = 0; i < suffixArray.length; i++) {
+        const suffixStart = suffixArray[i]
+        const lcp = i === 0 ? 0 : lcpArray[i - 1]
+
+        let currentNode = 0
+        let currentDepth = 0
+
+        while (currentDepth < lcp) {
+            const char = text.charAt(suffixStart + currentDepth)
+            const nodeChildren = children.get(currentNode)
+            
+            if (nodeChildren.has(char)) {
+                const child = nodeChildren.get(char)
+                if (child.depth <= lcp) {
+                    currentNode = child.nodeId
+                    currentDepth = child.depth
+                } else {
+                    const split = splitEdge(currentNode, currentDepth, child, lcp, suffixStart)
+                    currentNode = split.nodeId
+                    currentDepth = split.depth
+                    break
+                }
+            } else {
+                break
+            }
         }
 
+        const leafChar = text.charAt(suffixStart + currentDepth)
         const leafDepth = text.length - suffixStart
-        const leafId = nodes.length
-        nodes.push({ id: leafId, depth: leafDepth, suffixStart })
-        createEdge(top.nodeId, leafId, suffixStart + top.depth, text.length)
-        stack.push({ nodeId: leafId, depth: leafDepth })
-    })
+        
+        const leafId = nextNodeId++
+        nodes.push({ id: leafId, depth: leafDepth, type: 'leaf', suffixStart })
+        
+        edges.push({
+            from: currentNode,
+            to: leafId,
+            start: suffixStart + currentDepth,
+            end: text.length,
+            labelPreview: text.slice(suffixStart + currentDepth, Math.min(text.length, suffixStart + currentDepth + 32))
+        })
+        
+        children.get(currentNode).set(leafChar, { nodeId: leafId, depth: leafDepth })
+        children.set(leafId, new Map())
+    }
 
     return { nodes, edges }
 }
