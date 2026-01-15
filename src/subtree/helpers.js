@@ -59,16 +59,16 @@ export function mergeTreeStructures(trees, rootMeta = {}) {
 export function buildGroupSubTrees(text, group) {
     if (!group || !Array.isArray(group.prefixes)) {
         return {
-            prefixTrees: [],
+            suffixSubtrees: [],
             groupTree: createEmptyTree({ type: 'group-root', groupId: group?.id ?? null })
         }
     }
 
-    const prefixTrees = group.prefixes.map(prefixInfo => buildSubTreeForPrefix(text, prefixInfo))
-    const groupTree = mergeTreeStructures(prefixTrees, { type: 'group-root', groupId: group.id })
+    const suffixSubtrees = group.prefixes.map(prefixInfo => buildSubTreeForPrefix(text, prefixInfo))
+    const groupTree = mergeTreeStructures(suffixSubtrees, { type: 'group-root', groupId: group.id })
 
     return {
-        prefixTrees,
+        suffixSubtrees,
         groupTree
     }
 }
@@ -103,9 +103,65 @@ export function buildSubTreeForPrefix(text, prefixInfo) {
     }
 }
 
+export function buildGlobalSuffixTreeFromSubtrees(text, suffixSubtrees) {
+    if (typeof text !== 'string' || text.length === 0 || !Array.isArray(suffixSubtrees) || suffixSubtrees.length === 0) {
+        return {
+            suffixCount: 0,
+            suffixArray: [],
+            lcpArray: [],
+            nodes: [],
+            edges: []
+        }
+    }
+
+    const suffixPositions = new Set()
+    suffixSubtrees.forEach(tree => {
+        if (!tree || !Array.isArray(tree.nodes)) {
+            return
+        }
+
+        tree.nodes.forEach(node => {
+            if (node && node.type === 'leaf' && Number.isInteger(node.suffixStart)) {
+                suffixPositions.add(node.suffixStart)
+            }
+        })
+    })
+
+    if (suffixPositions.size === 0) {
+        return {
+            suffixCount: 0,
+            suffixArray: [],
+            lcpArray: [],
+            nodes: [],
+            edges: []
+        }
+    }
+
+    const suffixArray = buildSuffixArray(text, Array.from(suffixPositions))
+    const lcpArray = buildLcpArray(text, suffixArray)
+    const { nodes, edges } = buildSuffixTreeStructure(text, suffixArray, lcpArray)
+    const suffixes = suffixArray.map(start => ({
+        start,
+        end: text.length,
+        length: text.length - start,
+        preview: text.slice(start, Math.min(text.length, start + 32))
+    }))
+
+    return {
+        suffixCount: suffixArray.length,
+        suffixArray,
+        lcpArray,
+        nodes,
+        edges,
+        suffixes
+    }
+}
+
 export function decodeSharedBuffer(sharedBuffer) {
-    const view = new Uint8Array(sharedBuffer)
-    return decoder.decode(view)
+    const sharedView = new Uint8Array(sharedBuffer)
+    const copy = new Uint8Array(sharedView.length)
+    copy.set(sharedView)
+    return decoder.decode(copy)
 }
 
 function collectSuffixPositions(text, prefix) {
@@ -267,9 +323,17 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray) {
 
         const leafChar = text.charAt(suffixStart + currentDepth)
         const leafDepth = text.length - suffixStart
+        const leafEnd = suffixStart + leafDepth
         
         const leafId = nextNodeId++
-        nodes.push({ id: leafId, depth: leafDepth, type: 'leaf', suffixStart })
+        nodes.push({ 
+            id: leafId, 
+            depth: leafDepth, 
+            type: 'leaf', 
+            suffixStart,
+            suffixEnd: leafEnd,
+            suffixRange: [suffixStart, leafEnd]
+        })
         
         edges.push({
             from: currentNode,

@@ -1,8 +1,11 @@
 import { readFileAsArrayBuffer } from './utils/fileUtils.js'
-import { displayFileInfo, displayStats, displaySearchResults, displayStatus, displayPrefixes } from './ui/display.js'
+import { displayFileInfo, displayStats, displaySearchResults, displayStatus, displaySuffixTree } from './ui/display.js'
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 import { buildSubTrees } from './subtree/builder.js'
+import { buildGlobalSuffixTreeFromSubtrees } from './subtree/helpers.js'
+
+const textDecoder = new TextDecoder('utf-8')
 
 let dgstTree = null
 let currentFile = null
@@ -20,8 +23,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const searchBtn = document.getElementById('search-btn')
     const searchResults = document.getElementById('search-results')
 
-    fileUploadArea.addEventListener('click', () => fileInput.click())
-    
     fileUploadArea.addEventListener('dragover', (e) => {
         e.preventDefault()
         fileUploadArea.classList.add('dragover')
@@ -81,7 +82,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const allSPrefixes = await processIteratively(splits, config)
 
             displayStatus(buildStatus, 'loading', 'Групування та побудова піддерев...')
-            let subTreeResult = { groups: [], rounds: [], subTrees: [] }
+            let subTreeResult = { groups: [], rounds: [], subTrees: [], suffixSubtrees: [] }
             try {
                 subTreeResult = await buildSubTrees({
                     sharedBuffer,
@@ -90,31 +91,58 @@ document.addEventListener('DOMContentLoaded', function () {
                     executeRound: runSubTreeRound
                 })
             } catch (subTreeError) {
-                console.warn('Не вдалося побудувати всі піддерева:', subTreeError)
+                console.error('Не вдалося побудувати піддерева:', subTreeError)
+                displayStatus(buildStatus, 'error', `Помилка піддерева: ${subTreeError.message || subTreeError}`)
+                buildBtn.disabled = false
+                return
             }
             
-            let totalSuffixes = 0
+            let fallbackTotalSuffixes = 0
             splits.forEach(split => {
-                totalSuffixes += split.length
+                fallbackTotalSuffixes += split.length
             })
-            
+
             const buildTime = (performance.now() - startTime) / 1000
             
+            let globalSuffixTree = null
+            const suffixSubtrees = Array.isArray(subTreeResult.suffixSubtrees) ? subTreeResult.suffixSubtrees : []
+
+            if (suffixSubtrees.length > 0) {
+                displayStatus(buildStatus, 'loading', 'Побудова глобального суфіксного дерева...')
+                try {
+                    const sharedView = new Uint8Array(sharedBuffer)
+                    const copied = new Uint8Array(sharedView.length)
+                    copied.set(sharedView)
+                    const fullText = textDecoder.decode(copied)
+                    globalSuffixTree = buildGlobalSuffixTreeFromSubtrees(fullText, suffixSubtrees)
+                } catch (globalTreeError) {
+                    console.error('Не вдалося побудувати глобальне суфіксне дерево:', globalTreeError)
+                    displayStatus(buildStatus, 'error', `Помилка глобального дерева: ${globalTreeError.message || globalTreeError}`)
+                    buildBtn.disabled = false
+                    return
+                }
+            }
+
+            const resolvedSuffixCount = globalSuffixTree?.suffixCount || fallbackTotalSuffixes
+            const globalSuffixes = globalSuffixTree?.suffixes || []
+
             dgstTree = {
                 totalNodes: allSPrefixes.length,
                 totalEdges: allSPrefixes.reduce((sum, sp) => sum + sp.frequency, 0),
                 maxDepth: Math.max(...allSPrefixes.map(sp => sp.length), 0),
-                totalSuffixes: totalSuffixes,
+                totalSuffixes: resolvedSuffixCount,
                 buildTime: buildTime,
                 sPrefixes: allSPrefixes,
                 splits: splits.length,
                 subTrees: subTreeResult.subTrees,
                 subTreeGroups: subTreeResult.groups.length,
-                subTreeRounds: subTreeResult.rounds.length
+                subTreeRounds: subTreeResult.rounds.length,
+                globalTree: globalSuffixTree,
+                globalSuffixes
             }
             
             displayStatus(buildStatus, 'success', `DGST успішно побудовано за ${buildTime.toFixed(2)} сек!`)
-            displayPrefixes(document.getElementById('stats-container'), allSPrefixes)
+            displaySuffixTree(document.getElementById('stats-container'), globalSuffixTree)
             
             searchInput.disabled = false
             searchBtn.disabled = false
@@ -369,14 +397,7 @@ document.addEventListener('DOMContentLoaded', function () {
     
             // Hard Stop (запобіжник)
             if (windowSize > 100) {
-                console.warn('Досягнуто максимальний розмір вікна! Примусово зберігаю великі префікси.')
-
-                 for (const [prefix, count] of globalMap.entries()) {
-                    if (count > config.memoryLimit) {
-                         finalPrefixes.push({ prefix, frequency: count, length: windowSize })
-                    }
-                }
-                break
+                throw new Error('Досягнуто максимальний розмір вікна. Неможливо обробити всі префікси в межах memoryLimit.')
             }
         }
     

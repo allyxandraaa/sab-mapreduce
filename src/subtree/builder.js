@@ -5,7 +5,8 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
         return {
             groups: [],
             rounds: [],
-            subTrees: []
+            subTrees: [],
+            suffixSubtrees: []
         }
     }
 
@@ -18,12 +19,17 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
 
     const { groups, rounds } = allocateTaskGroups(sPrefixes, memoryLimit, numWorkers)
     const subTrees = []
+    const suffixSubtrees = []
 
     for (const round of rounds) {
         const roundResults = await executeRound(round)
         roundResults.forEach(result => {
-            if (result && result.trees) {
-                subTrees.push(result)
+            if (!result) {
+                return
+            }
+            subTrees.push(result)
+            if (Array.isArray(result.suffixSubtrees)) {
+                suffixSubtrees.push(...result.suffixSubtrees)
             }
         })
     }
@@ -31,6 +37,7 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
     return {
         groups,
         rounds,
-        subTrees
+        subTrees,
+        suffixSubtrees
     }
 }

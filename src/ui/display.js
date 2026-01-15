@@ -40,7 +40,7 @@ export function displayStats(stats) {
                 <div class="stat-label">S-префіксів</div>
                 <div class="stat-value">${stats.sPrefixes ? stats.sPrefixes.length : 0}</div>
             </div>
-            <div class="stat-item" style="grid-column: 1 / -1;">
+            <div class="stat-item stat-item-full">
                 <div class="stat-label">Час побудови</div>
                 <div class="stat-value">${stats.buildTime ? stats.buildTime.toFixed(2) + ' сек' : 'N/A'}</div>
             </div>
@@ -61,7 +61,7 @@ export function displaySearchResults(container, query, results) {
     }
 
     container.innerHTML = `
-        <div style="margin-bottom: 10px; font-weight: bold; color: #555;">
+        <div class="search-results-summary">
             Знайдено: ${results.length} результатів для "${query}"
         </div>
         ${results.map((result, index) => `
@@ -101,49 +101,159 @@ export function displayStatus(element, type, message) {
     element.innerHTML = `<div class="${className}">${icon} ${message}</div>`
 }
 
-export function displayPrefixes(container, prefixes) {
-    if (!prefixes || prefixes.length === 0) {
-        container.innerHTML = '<div class="loading">Префікси не знайдено</div>'
+export function displaySuffixTree(container, tree) {
+    if (!tree || !Array.isArray(tree.nodes) || tree.nodes.length === 0) {
+        container.innerHTML = '<div class="loading">Глобальне суфіксне дерево недоступне</div>'
         return
     }
 
-    const sorted = [...prefixes].sort((a, b) => {
-        if (a.length !== b.length) return a.length - b.length
-        if (a.frequency !== b.frequency) return b.frequency - a.frequency
-        return a.prefix.localeCompare(b.prefix)
+    if (typeof window === 'undefined' || typeof window.d3 === 'undefined') {
+        container.innerHTML = '<div class="error">D3.js не завантажено. Неможливо побудувати візуалізацію.</div>'
+        return
+    }
+
+    const d3 = window.d3
+    const nodesMap = new Map()
+    tree.nodes.forEach(node => {
+        nodesMap.set(node.id, { ...node, children: [], edgeLabel: '' })
     })
 
+    const edges = Array.isArray(tree.edges) ? tree.edges : []
+    edges.forEach(edge => {
+        const parent = nodesMap.get(edge.from)
+        const child = nodesMap.get(edge.to)
+        if (parent && child) {
+            child.edgeLabel = edge.labelPreview || `${edge.start}-${edge.end}`
+            parent.children.push(child)
+        }
+    })
+
+    let root = nodesMap.get(0)
+    if (!root) {
+        root = Array.from(nodesMap.values()).find(node => node.type === 'root') || nodesMap.values().next().value
+    }
+
+    if (!root) {
+        container.innerHTML = '<div class="error">Не вдалося знайти корінь дерева для візуалізації.</div>'
+        return
+    }
+
+    const nodeCount = tree.nodes.length
+    const edgeCount = edges.length
+    const suffixCount = tree.suffixCount || tree.nodes.filter(n => n.type === 'leaf').length
+
     container.innerHTML = `
-        <div style="margin-bottom: 15px; font-weight: bold; color: #555; font-size: 16px;">
-            Всього префіксів: ${prefixes.length}
-        </div>
-        <div style="max-height: 600px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px; background: #f9f9f9;">
-            <table style="width: 100%; border-collapse: collapse;">
-                <thead>
-                    <tr style="background: #e0e0e0; position: sticky; top: 0;">
-                        <th style="padding: 8px; text-align: left; border-bottom: 2px solid #999;">Префікс</th>
-                        <th style="padding: 8px; text-align: center; border-bottom: 2px solid #999;">Довжина</th>
-                        <th style="padding: 8px; text-align: right; border-bottom: 2px solid #999;">Частота</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${sorted.map(sp => `
-                        <tr style="border-bottom: 1px solid #eee;">
-                            <td style="padding: 6px; font-family: monospace; font-size: 14px;">${escapeHtml(sp.prefix)}</td>
-                            <td style="padding: 6px; text-align: center;">${sp.length}</td>
-                            <td style="padding: 6px; text-align: right; font-weight: bold;">${sp.frequency}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
+        <div class="tree-panel">
+            <div class="tree-panel-meta">
+                <div><span>Вузлів</span>${nodeCount}</div>
+                <div><span>Ребер</span>${edgeCount}</div>
+                <div><span>Суфіксів</span>${suffixCount}</div>
+            </div>
+            <div class="tree-canvas">
+                <svg class="tree-svg" aria-label="Suffix tree visualization"></svg>
+            </div>
         </div>
     `
+
+    const svgElement = container.querySelector('svg')
+    const width = container.clientWidth || 900
+    const height = 700
+    const svg = d3.select(svgElement)
+    svg.selectAll('*').remove()
+    svg.attr('viewBox', `0 0 ${width} ${height}`)
+
+    const g = svg.append('g').attr('class', 'tree-layer')
+    const zoom = d3.zoom().scaleExtent([0.2, 3]).on('zoom', (event) => {
+        g.attr('transform', event.transform)
+    })
+    svg.call(zoom)
+
+    const hierarchyRoot = d3.hierarchy(root, d => d.children)
+    const treeLayout = d3.tree().nodeSize([60, 180])
+    treeLayout(hierarchyRoot)
+
+    let minX = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    hierarchyRoot.each(node => {
+        if (node.x < minX) minX = node.x
+        if (node.x > maxX) maxX = node.x
+        if (node.y > maxY) maxY = node.y
+    })
+    const xOffset = (width - (maxX - minX)) / 2 - minX
+    hierarchyRoot.each(node => {
+        node.x += xOffset
+        node.y += 80
+    })
+
+    const linkGenerator = d3.linkVertical().x(d => d.x).y(d => d.y)
+    const links = hierarchyRoot.links()
+    links.forEach((link, index) => { link.__linkId = index })
+
+    g.append('g')
+        .attr('class', 'tree-links')
+        .selectAll('path')
+        .data(links)
+        .join('path')
+        .attr('class', 'tree-link')
+        .attr('id', d => `tree-link-${d.__linkId}`)
+        .attr('d', linkGenerator)
+
+    const linkLabelData = links.filter(link => (link.target.data.edgeLabel || '').length > 0)
+    const linkLabels = g.append('g')
+        .attr('class', 'tree-link-labels')
+        .selectAll('text')
+        .data(linkLabelData)
+        .join('text')
+        .attr('class', 'tree-link-label')
+        .attr('text-anchor', 'middle')
+
+    linkLabels.append('textPath')
+        .attr('href', d => `#tree-link-${d.__linkId}`)
+        .attr('startOffset', '50%')
+        .text(d => {
+            const label = d.target.data.edgeLabel || ''
+            if (label.length > 28) {
+                return label.slice(0, 28) + '…'
+            }
+            return label
+        })
+
+    linkLabels.append('title').text(d => d.target.data.edgeLabel || '')
+
+    const nodeGroup = g.append('g')
+        .attr('class', 'tree-nodes')
+        .selectAll('g')
+        .data(hierarchyRoot.descendants())
+        .join('g')
+        .attr('class', 'tree-node')
+        .attr('transform', d => `translate(${d.x}, ${d.y})`)
+
+    nodeGroup.append('circle')
+        .attr('r', d => d.data.type === 'leaf' ? 4 : 6)
+
+    nodeGroup.append('text')
+        .attr('class', 'tree-node-label')
+        .attr('dy', -10)
+        .attr('text-anchor', 'middle')
+        .text(d => {
+            if (d.data.type === 'leaf' && Number.isInteger(d.data.suffixStart)) {
+                const start = d.data.suffixStart
+                const end = Number.isInteger(d.data.suffixEnd) ? d.data.suffixEnd : (d.data.suffixRange?.[1] ?? '')
+                return `[${start}:${end}]`
+            }
+            return d.data.depth ?? ''
+        })
+
+    nodeGroup.append('title').text(d => {
+        if (d.data.type === 'leaf') {
+            const start = d.data.suffixStart ?? 0
+            const end = d.data.suffixEnd ?? d.data.suffixRange?.[1] ?? ''
+            return `Leaf [${start}:${end}]`
+        }
+        return `Depth: ${d.data.depth ?? 0}`
+    })
+
+    svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, 40))
     container.style.display = 'block'
 }
-
-function escapeHtml(text) {
-    const div = document.createElement('div')
-    div.textContent = text
-    return div.innerHTML
-}
-
