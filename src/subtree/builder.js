@@ -17,22 +17,58 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
     const memoryLimit = config?.memoryLimit || 1024
     const numWorkers = Math.max(1, config?.numWorkers)
 
+    console.info('[SubTree] Старт побудови піддерев', {
+        prefixes: sPrefixes.length,
+        memoryLimit,
+        numWorkers
+    })
+
     const { groups, rounds } = allocateTaskGroups(sPrefixes, memoryLimit, numWorkers)
+
+    console.info('[SubTree] Результат розподілу груп', {
+        groupCount: groups.length,
+        roundCount: rounds.length,
+        avgPrefixesPerGroup: groups.length ? (sPrefixes.length / groups.length).toFixed(2) : 0
+    })
+
     const subTrees = []
     const suffixSubtrees = []
 
-    for (const round of rounds) {
+    for (let index = 0; index < rounds.length; index++) {
+        const round = rounds[index]
+        const groupIds = round.map(group => group?.id)
+        console.info(`[SubTree] Виконуємо раунд ${index + 1}/${rounds.length}`, {
+            groupsInRound: round.length,
+            groupIds
+        })
+
         const roundResults = await executeRound(round)
+
+        console.info(`[SubTree] Завершено раунд ${index + 1}/${rounds.length}`, {
+            receivedResults: roundResults.length,
+            nullResults: roundResults.filter(res => !res).length
+        })
+
         roundResults.forEach(result => {
             if (!result) {
                 return
             }
+            console.info('[SubTree] Отримано результат групи', {
+                groupId: result.groupId,
+                suffixTreeCount: result.treeCount,
+                totalFrequency: result.totalFrequency
+            })
             subTrees.push(result)
             if (Array.isArray(result.suffixSubtrees)) {
                 suffixSubtrees.push(...result.suffixSubtrees)
             }
         })
     }
+
+    console.info('[SubTree] Побудову піддерев завершено', {
+        totalSubTrees: subTrees.length,
+        totalSuffixSubtrees: suffixSubtrees.length
+    })
 
     return {
         groups,

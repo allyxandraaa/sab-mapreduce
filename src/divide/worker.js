@@ -1,6 +1,6 @@
 import { createSplitView } from './splitter.js'
 import { computeSPrefixes } from '../suffix-prefix/sprefix.js'
-import { decodeSharedBuffer, buildGroupSubTrees } from '../subtree/helpers.js'
+import { decodeSharedBuffer, buildGroupSubTrees, buildGlobalSuffixTreeFromSubtrees } from '../subtree/helpers.js'
 
 self.onmessage = function(event) {
     try {
@@ -78,6 +78,49 @@ self.onmessage = function(event) {
                     suffixSubtrees,
                     groupTree
                 }
+            })
+        } else if (phase === 'global-tree') {
+            if (!sharedBuffer || !Array.isArray(event.data.suffixSubtrees)) {
+                throw new Error('Відсутні дані для побудови глобального дерева')
+            }
+
+            self.postMessage({
+                type: 'progress',
+                phase: 'global-tree',
+                stage: 'start',
+                meta: {
+                    subtreeCount: event.data.suffixSubtrees.length,
+                    bufferLength: sharedBuffer.byteLength
+                }
+            })
+
+            const text = decodeSharedBuffer(sharedBuffer)
+
+            self.postMessage({
+                type: 'progress',
+                phase: 'global-tree',
+                stage: 'decoded',
+                meta: {
+                    textLength: text.length
+                }
+            })
+
+            const globalTree = buildGlobalSuffixTreeFromSubtrees(text, event.data.suffixSubtrees)
+
+            self.postMessage({
+                type: 'progress',
+                phase: 'global-tree',
+                stage: 'build-complete',
+                meta: {
+                    suffixCount: globalTree?.suffixCount || 0,
+                    nodeCount: globalTree?.nodes?.length || 0
+                }
+            })
+
+            self.postMessage({
+                type: 'success',
+                phase: 'global-tree',
+                result: globalTree
             })
         } else {
             throw new Error(`Unknown phase: ${phase}`)

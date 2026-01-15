@@ -3,9 +3,7 @@ import { displayFileInfo, displayStats, displaySearchResults, displayStatus, dis
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 import { buildSubTrees } from './subtree/builder.js'
-import { buildGlobalSuffixTreeFromSubtrees } from './subtree/helpers.js'
-
-const textDecoder = new TextDecoder('utf-8')
+import { searchInSuffixTree } from './search/searchTree.js'
 
 let dgstTree = null
 let currentFile = null
@@ -54,6 +52,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         
         buildBtn.disabled = true
+        console.info('[Build] Старт побудови, кнопка вимкнена')
         const startTime = performance.now()
         displayStatus(buildStatus, 'loading', 'Побудова DGST...')
         
@@ -94,6 +93,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 console.error('Не вдалося побудувати піддерева:', subTreeError)
                 displayStatus(buildStatus, 'error', `Помилка піддерева: ${subTreeError.message || subTreeError}`)
                 buildBtn.disabled = false
+                console.info('[Build] Завершено з помилкою, кнопка увімкнена')
                 return
             }
             
@@ -110,11 +110,25 @@ document.addEventListener('DOMContentLoaded', function () {
             if (suffixSubtrees.length > 0) {
                 displayStatus(buildStatus, 'loading', 'Побудова глобального суфіксного дерева...')
                 try {
-                    const sharedView = new Uint8Array(sharedBuffer)
-                    const copied = new Uint8Array(sharedView.length)
-                    copied.set(sharedView)
-                    const fullText = textDecoder.decode(copied)
-                    globalSuffixTree = buildGlobalSuffixTreeFromSubtrees(fullText, suffixSubtrees)
+                    console.time('[GlobalTree] worker-build')
+                    globalSuffixTree = await buildGlobalTreeInWorker(sharedBuffer, suffixSubtrees, (progressEvent) => {
+                        if (!progressEvent || progressEvent.phase !== 'global-tree') {
+                            return
+                        }
+
+                        const stageLabel = {
+                            start: 'Підготовка даних для глобального дерева...',
+                            decoded: 'Декодування тексту завершено, створюємо масив суфіксів...',
+                            'build-complete': 'Фіналізуємо глобальне дерево...'
+                        }[progressEvent.stage]
+
+                        if (stageLabel) {
+                            displayStatus(buildStatus, 'loading', stageLabel)
+                        }
+
+                        console.info('[GlobalTree][Worker]', progressEvent.stage, progressEvent.meta || {})
+                    })
+                    console.timeEnd('[GlobalTree] worker-build')
                 } catch (globalTreeError) {
                     console.error('Не вдалося побудувати глобальне суфіксне дерево:', globalTreeError)
                     displayStatus(buildStatus, 'error', `Помилка глобального дерева: ${globalTreeError.message || globalTreeError}`)
@@ -142,15 +156,19 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             
             displayStatus(buildStatus, 'success', `DGST успішно побудовано за ${buildTime.toFixed(2)} сек!`)
+            console.time('[GlobalTree] render-display')
             displaySuffixTree(document.getElementById('stats-container'), globalSuffixTree)
+            console.timeEnd('[GlobalTree] render-display')
             
             searchInput.disabled = false
             searchBtn.disabled = false
             buildBtn.disabled = false
+            console.info('[Build] Побудову завершено, кнопка увімкнена')
         } catch (error) {
             console.error("Помилка при побудові DGST:", error)
             displayStatus(buildStatus, 'error', `Помилка: ${error.message}`)
             buildBtn.disabled = false
+            console.info('[Build] Пост global catch, кнопка увімкнена через помилку')
         }
     })
     
@@ -158,57 +176,61 @@ document.addEventListener('DOMContentLoaded', function () {
         if (workerPool.length === 0) {
             initializeWorkerPool(partitions.length)
         }
-        
+
         const promises = []
-        
+
         for (let i = 0; i < partitions.length; i++) {
             const partition = partitions[i]
             if (partition.length === 0) {
                 promises.push(Promise.resolve({ sPrefixes: [] }))
                 continue
             }
-            
+
             const worker = workerPool[i % workerPool.length]
-            
+
             const promise = new Promise((resolve, reject) => {
                 const handler = (event) => {
                     worker.removeEventListener('message', handler)
                     worker.removeEventListener('error', errorHandler)
-                    
+
                     if (event.data.type === 'success') {
                         resolve(event.data.result)
                     } else if (event.data.type === 'error') {
                         reject(new Error(event.data.error))
                     }
                 }
-                
+
                 const errorHandler = (error) => {
                     worker.removeEventListener('message', handler)
                     worker.removeEventListener('error', errorHandler)
                     reject(error)
                 }
-                
+
                 worker.addEventListener('message', handler)
                 worker.addEventListener('error', errorHandler)
-                
+
                 worker.postMessage({
                     phase: 'reduce',
                     partition: partition,
                     partitionIndex: i
                 })
             })
-            
+
             promises.push(promise)
         }
-        
-        const results = await Promise.all(promises)
-        return results
+
+        return Promise.all(promises)
     }
-    
+
     async function runSubTreeRound(groups) {
         if (!Array.isArray(groups) || groups.length === 0) {
             return []
         }
+
+        console.info('[SubTree] runSubTreeRound старт', {
+            groupCount: groups.length,
+            groupIds: groups.map(group => group?.id)
+        })
 
         if (!sharedBuffer) {
             throw new Error('SharedArrayBuffer недоступний для побудови піддерев')
@@ -233,14 +255,30 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const worker = workerPool[index]
 
+            console.debug('[SubTree] Надсилаємо групу воркеру', {
+                workerIndex: index,
+                groupId: group.id,
+                prefixCount: group.prefixes.length
+            })
+
             return new Promise((resolve, reject) => {
                 const handler = (event) => {
                     worker.removeEventListener('message', handler)
                     worker.removeEventListener('error', errorHandler)
 
                     if (event.data.type === 'success' && event.data.phase === 'subtree') {
+                        console.debug('[SubTree] Отримано результат від воркера', {
+                            workerIndex: index,
+                            groupId: group.id,
+                            suffixTreeCount: event.data.result?.treeCount
+                        })
                         resolve(event.data.result)
                     } else if (event.data.type === 'error') {
+                        console.error('[SubTree] Воркер повернув помилку', {
+                            workerIndex: index,
+                            groupId: group.id,
+                            error: event.data.error
+                        })
                         reject(new Error(event.data.error))
                     } else {
                         resolve(null)
@@ -264,9 +302,70 @@ document.addEventListener('DOMContentLoaded', function () {
             })
         })
 
-        return Promise.all(promises)
+        const roundResults = await Promise.all(promises)
+
+        console.info('[SubTree] runSubTreeRound завершено', {
+            resolvedResults: roundResults.filter(Boolean).length,
+            emptyResults: roundResults.filter(res => !res).length
+        })
+
+        return roundResults
     }
-    
+
+    async function buildGlobalTreeInWorker(sharedBuffer, suffixSubtrees, onProgress) {
+        if (!sharedBuffer) {
+            throw new Error('SharedArrayBuffer недоступний для глобального дерева')
+        }
+
+        if (!Array.isArray(suffixSubtrees) || suffixSubtrees.length === 0) {
+            return null
+        }
+
+        return new Promise((resolve, reject) => {
+            const worker = new Worker('src/divide/worker.js', { type: 'module' })
+
+            const cleanup = () => {
+                worker.removeEventListener('message', messageHandler)
+                worker.removeEventListener('error', errorHandler)
+                worker.terminate()
+            }
+
+            const messageHandler = (event) => {
+                const data = event.data
+                if (!data) {
+                    return
+                }
+
+                if (data.type === 'progress' && data.phase === 'global-tree') {
+                    onProgress?.(data)
+                    return
+                }
+
+                if (data.type === 'success' && data.phase === 'global-tree') {
+                    cleanup()
+                    resolve(data.result)
+                } else if (data.type === 'error') {
+                    cleanup()
+                    reject(new Error(data.error))
+                }
+            }
+
+            const errorHandler = (error) => {
+                cleanup()
+                reject(error)
+            }
+
+            worker.addEventListener('message', messageHandler)
+            worker.addEventListener('error', errorHandler)
+
+            worker.postMessage({
+                phase: 'global-tree',
+                sharedBuffer,
+                suffixSubtrees
+            })
+        })
+    }
+
     let workerPool = []
     
     function initializeWorkerPool(numWorkers) {
@@ -278,43 +377,43 @@ document.addEventListener('DOMContentLoaded', function () {
             workerPool.push(worker)
         }
     }
-    
+
     async function runMapWorkers(splits, config, targetPrefixes = null) {
         if (workerPool.length !== config.numWorkers || splits.length !== config.numWorkers) {
             initializeWorkerPool(config.numWorkers)
         }
-        
+
         if (splits.length !== workerPool.length) {
             throw new Error(`Кількість сплітів (${splits.length}) не відповідає кількості воркерів (${workerPool.length})`)
         }
-        
+
         const promises = []
-        
+
         for (let i = 0; i < splits.length; i++) {
             const split = splits[i]
             const worker = workerPool[i]
-            
+
             const promise = new Promise((resolve, reject) => {
                 const handler = (event) => {
                     worker.removeEventListener('message', handler)
                     worker.removeEventListener('error', errorHandler)
-                    
+
                     if (event.data.type === 'success') {
                         resolve(event.data.result)
                     } else if (event.data.type === 'error') {
                         reject(new Error(event.data.error))
                     }
                 }
-                
+
                 const errorHandler = (error) => {
                     worker.removeEventListener('message', handler)
                     worker.removeEventListener('error', errorHandler)
                     reject(error)
                 }
-                
+
                 worker.addEventListener('message', handler)
                 worker.addEventListener('error', errorHandler)
-                
+
                 worker.postMessage({
                     phase: 'divide',
                     sharedBuffer: sharedBuffer,
@@ -324,23 +423,22 @@ document.addEventListener('DOMContentLoaded', function () {
                     targetPrefixes: targetPrefixes ? Array.from(targetPrefixes) : null
                 })
             })
-            
+
             promises.push(promise)
         }
-        
+
         const results = await Promise.all(promises)
         return results
     }
-    
+
     async function processIteratively(splits, config) {
         let windowSize = config.windowSize
-        let targetPrefixes = null 
-        let finalPrefixes = []
-    
+        let targetPrefixes = null
+        const finalPrefixes = []
+
         while (true) {
             config.windowSize = windowSize
-    
-            // 1. Оновлюємо хвости для нового вікна
+
             const updatedSplits = splits.map(split => {
                 const tail = windowSize - 1
                 return {
@@ -348,59 +446,37 @@ document.addEventListener('DOMContentLoaded', function () {
                     tailedEnd: Math.min(split.end + tail, sharedBuffer.byteLength)
                 }
             })
-    
-    
-             // 2. Запускаємо воркерів
-             // ВАЖЛИВО: Воркери мають знати, що якщо targetPrefixes != null,
-             // то вони ігнорують все, що не починається з цих префіксів.
-             const mapResults = await runMapWorkers(updatedSplits, config, targetPrefixes)
-            
+
+            const mapResults = await runMapWorkers(updatedSplits, config, targetPrefixes)
             const { shuffleByKey, mergeReduceResults } = await import('./merge/shuffle.js')
-            
             const shuffledPartitions = shuffleByKey(mapResults, config.numWorkers)
             const reduceResults = await runReduceWorkers(shuffledPartitions)
             const aggregated = mergeReduceResults(reduceResults)
-    
-            const globalMap = new Map()
-            aggregated.forEach(sp => {
-                globalMap.set(sp.prefix, sp.frequency)
-            })
-    
+
             const nextRoundTargets = new Set()
             let hasProblematic = false
-            let validCount = 0
-            let problematicCount = 0
-    
-            // 3. Сортуємо: Валідні -> у результат, Проблемні -> на наступне коло
-            for (const [prefix, count] of globalMap.entries()) {
-                if (count > config.memoryLimit) {
-                    // Це "товстий" префікс. Ми його НЕ додаємо у фінальний список.
-                    // Ми його уточнюватимемо в наступному раунді.
-                    nextRoundTargets.add(prefix)
+
+            aggregated.forEach(sp => {
+                if (sp.frequency > config.memoryLimit) {
+                    nextRoundTargets.add(sp.prefix)
                     hasProblematic = true
-                    problematicCount++
                 } else {
-                    // Це "нормальний" префікс. Він готовий.
-                    // Записуємо і забуваємо про нього.
-                    finalPrefixes.push({ prefix, frequency: count, length: windowSize })
-                    validCount++
+                    finalPrefixes.push({ prefix: sp.prefix, frequency: sp.frequency, length: windowSize })
                 }
-            }
-    
-    
-            // 4. Логіка переходу
+            })
+
             if (!hasProblematic) {
                 break
             }
+
             targetPrefixes = nextRoundTargets
-            windowSize++ 
-    
-            // Hard Stop (запобіжник)
+            windowSize++
+
             if (windowSize > 100) {
                 throw new Error('Досягнуто максимальний розмір вікна. Неможливо обробити всі префікси в межах memoryLimit.')
             }
         }
-    
+
         return finalPrefixes
     }
 
@@ -413,32 +489,35 @@ document.addEventListener('DOMContentLoaded', function () {
 
     async function handleFileSelect(file) {
         currentFile = file
+        console.info('[Build] handleFileSelect отримав файл', { name: file.name, size: file.size })
         const fileSize = (file.size / 1024).toFixed(2)
         displayFileInfo(fileInfo, file.name, fileSize)
         
         buildBtn.disabled = false
+        console.info('[Build] Кнопка побудови активована після вибору файлу')
         dgstTree = null
         sharedBuffer = null
         config = null
         
         searchInput.disabled = true
         searchBtn.disabled = true
-        searchResults.style.display = 'none'
-        displayStats(null)
-        displayStatus(buildStatus, null, '')
     }
 
-    function handleSearch() {
-        const query = searchInput.value.trim()
-        if (!query || !dgstTree) return
+    async function handleSearch() {
+        if (!dgstTree) {
+            alert('DGST не побудовано')
+            return
+        }
 
-        const mockResults = [
-            { position: 42, context: '...текст навколо знайденого слова...' },
-            { position: 156, context: '...інший контекст зі словом...' },
-            { position: 289, context: '...ще один приклад використання...' }
-        ]
-        
-        displaySearchResults(searchResults, query, mockResults)
+        const query = searchInput.value
+        const searchResultsContainer = document.getElementById('search-results')
+        searchResultsContainer.innerHTML = ''
+
+        const searchResult = await searchInSuffixTree(dgstTree.globalTree, query)
+        if (searchResult) {
+            displaySearchResults(searchResultsContainer, searchResult)
+        } else {
+            searchResultsContainer.innerHTML = 'Результата не знайдено'
+        }
     }
 })
-

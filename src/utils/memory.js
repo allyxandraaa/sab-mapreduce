@@ -1,17 +1,14 @@
-export function calculateMemoryLimit() {
-    const memoryLimit = navigator.deviceMemory || 4
-    
-    let Fm
-    
-    if (memoryLimit <= 2) {
-        Fm = 30
-    } else if (memoryLimit <= 4) {
-        Fm = 50
-    } else {
-        Fm = 70
-    }
-    
-    return Fm
+export function calculateMemoryLimit({ fileSize = 0, numWorkers = 1 } = {}) {
+    // орієнтовно співвідносимо кількість суфіксів з розміром файлу
+    const safeWorkers = Math.max(1, numWorkers)
+    const sizePerWorker = Math.max(1, Math.floor(fileSize / safeWorkers))
+
+    // коефіцієнт «ущільнення» для підрахунку частот
+    const baseLimit = Math.floor(sizePerWorker / 6)
+    const normalizedLimit = Math.max(500, baseLimit)
+
+    // обмежуємо верхню межу, щоб не передавати надмірно великі значення
+    return Math.min(normalizedLimit, 200000)
 }
 
 export function calculateOptimalWorkers(fileSize, memoryLimit) {
