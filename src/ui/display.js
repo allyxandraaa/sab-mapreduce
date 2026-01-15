@@ -113,6 +113,40 @@ export function displaySuffixTree(container, tree) {
     }
 
     const d3 = window.d3
+    const fullText = typeof tree.text === 'string' ? tree.text : null
+    const tooltipId = 'suffix-tree-tooltip'
+    let tooltip = document.getElementById(tooltipId)
+    if (!tooltip) {
+        tooltip = document.createElement('div')
+        tooltip.id = tooltipId
+        tooltip.className = 'tree-tooltip'
+        document.body.appendChild(tooltip)
+    }
+    const hideTooltip = () => {
+        tooltip.classList.remove('is-visible')
+    }
+    const showTooltip = (event, content) => {
+        tooltip.textContent = content
+        tooltip.style.left = `${event.pageX + 16}px`
+        tooltip.style.top = `${event.pageY + 16}px`
+        tooltip.classList.add('is-visible')
+    }
+    const updateTooltipPosition = (event) => {
+        if (!tooltip.classList.contains('is-visible')) return
+        tooltip.style.left = `${event.pageX + 16}px`
+        tooltip.style.top = `${event.pageY + 16}px`
+    }
+    const formatNodeTooltip = (d) => {
+        if (d.data.type === 'leaf') {
+            const start = d.data.suffixStart ?? 0
+            if (fullText && start >= 0 && start < fullText.length) {
+                const suffix = fullText.slice(start)
+                return `Suffix @ ${start}: ${suffix}`
+            }
+            return `Leaf starts at ${start}`
+        }
+        return `Depth: ${d.data.depth ?? 0}`
+    }
     const nodesMap = new Map()
     tree.nodes.forEach(node => {
         nodesMap.set(node.id, { ...node, children: [], edgeLabel: '' })
@@ -238,21 +272,21 @@ export function displaySuffixTree(container, tree) {
         .attr('text-anchor', 'middle')
         .text(d => {
             if (d.data.type === 'leaf' && Number.isInteger(d.data.suffixStart)) {
-                const start = d.data.suffixStart
-                const end = Number.isInteger(d.data.suffixEnd) ? d.data.suffixEnd : (d.data.suffixRange?.[1] ?? '')
-                return `[${start}:${end}]`
+                return `#${d.data.suffixStart}`
             }
-            return d.data.depth ?? ''
+            return d.data.id ?? ''
         })
 
-    nodeGroup.append('title').text(d => {
-        if (d.data.type === 'leaf') {
-            const start = d.data.suffixStart ?? 0
-            const end = d.data.suffixEnd ?? d.data.suffixRange?.[1] ?? ''
-            return `Leaf [${start}:${end}]`
-        }
-        return `Depth: ${d.data.depth ?? 0}`
-    })
+    nodeGroup
+        .on('mouseenter', (event, d) => {
+            showTooltip(event, formatNodeTooltip(d))
+        })
+        .on('mousemove', (event) => {
+            updateTooltipPosition(event)
+        })
+        .on('mouseleave', () => {
+            hideTooltip()
+        })
 
     svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, 40))
     container.style.display = 'block'

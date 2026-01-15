@@ -67,7 +67,7 @@ document.addEventListener('DOMContentLoaded', function () {
             displayStatus(buildStatus, 'loading', 'Ініціалізація конфігурації...')
             const numWorkers = parseInt(numWorkersInput.value) || 4
             config = new DGSTConfig({ 
-                windowSize: 2,
+                windowSize: 1,
                 numWorkers: numWorkers
             })
             await config.initialize(arrayBuffer.byteLength)

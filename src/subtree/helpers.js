@@ -153,7 +153,8 @@ export function buildGlobalSuffixTreeFromSubtrees(text, suffixSubtrees) {
         lcpArray,
         nodes,
         edges,
-        suffixes
+        suffixes,
+        text
     }
 }
 
@@ -330,9 +331,7 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray) {
             id: leafId, 
             depth: leafDepth, 
             type: 'leaf', 
-            suffixStart,
-            suffixEnd: leafEnd,
-            suffixRange: [suffixStart, leafEnd]
+            suffixStart
         })
         
         edges.push({

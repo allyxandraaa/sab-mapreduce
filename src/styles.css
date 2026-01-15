@@ -304,7 +304,29 @@ button:disabled {
 
 .tree-node-label {
     font-size: 12px;
-    fill: #333;
+    fill: var(--color-text-light);
+}
+
+.tree-tooltip {
+    position: fixed;
+    z-index: 2000;
+    max-width: 360px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(12, 16, 24, 0.94);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.4;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+    transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.tree-tooltip.is-visible {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
 }
 
 @media (max-width: 768px) {

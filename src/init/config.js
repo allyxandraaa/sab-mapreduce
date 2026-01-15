@@ -1,6 +1,6 @@
 export class DGSTConfig {
     constructor(options = {}) {
-        this.windowSize = options.windowSize || 2
+        this.windowSize = options.windowSize || 1
         this.memoryLimit = options.memoryLimit || null
         this.numWorkers = options.numWorkers || 4
         this.minSplitSize = options.minSplitSize || 1024
