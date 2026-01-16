@@ -6,10 +6,14 @@ export function allocateTaskGroups(sPrefixes, memoryLimit, numWorkers) {
     const sorted = [...sPrefixes].sort((a, b) => b.frequency - a.frequency)
     const effectiveCapacity = Math.max(memoryLimit || 1, 1)
 
-    const minGroupCount = estimateGroupCount(sorted, effectiveCapacity)
+    const minGroupCount = Math.max(1, estimateGroupCount(sorted, effectiveCapacity))
     const workers = Math.max(1, numWorkers)
-    const alignedGroups = Math.ceil(minGroupCount / workers) * workers
-    const targetGroupCount = Math.max(workers, alignedGroups)
+
+    let targetGroupCount = minGroupCount
+    if (minGroupCount >= workers) {
+        const alignedGroups = Math.ceil(minGroupCount / workers) * workers
+        targetGroupCount = Math.max(workers, alignedGroups)
+    }
 
     const balancedGroups = buildBalancedGroups(sorted, effectiveCapacity, targetGroupCount)
     const rounds = []

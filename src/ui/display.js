@@ -70,6 +70,10 @@ export function displayStats(stats) {
                 <div class="stat-label">S-префіксів</div>
                 <div class="stat-value">${stats.sPrefixes?.length ?? 0}</div>
             </div>
+            <div class="stat-item">
+                <div class="stat-label">Ліміт пам'яті</div>
+                <div class="stat-value">${stats.memoryLimit ?? 'N/A'}</div>
+            </div>
             <div class="stat-item stat-item-full">
                 <div class="stat-label">Час побудови</div>
                 <div class="stat-value">${stats.buildTime ? stats.buildTime.toFixed(2) + ' сек' : 'N/A'}</div>
@@ -103,8 +107,8 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
     const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
 
     subTrees.forEach((groupResult, index) => {
-        const groupTree = groupResult?.groupTree
-        if (!groupTree || !Array.isArray(groupTree.nodes) || groupTree.nodes.length === 0) {
+        const groupTrees = Array.isArray(groupResult?.suffixSubtrees) ? groupResult.suffixSubtrees : []
+        if (groupTrees.length === 0) {
             return
         }
 
@@ -118,136 +122,184 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
 
         const groupMeta = document.createElement('div')
         groupMeta.className = 'subtree-group-meta'
-        const suffixCount = groupResult?.treeCount ?? groupTree.nodes.length ?? 0
-        groupMeta.textContent = `Вузлів: ${groupTree.nodes.length || 0} · Піддерев: ${suffixCount}`
+        groupMeta.textContent = `Префіксів: ${groupTrees.length}`
 
         const canvasWrapper = document.createElement('div')
         canvasWrapper.className = 'subtree-group-canvas'
-        const canvas = document.createElement('div')
-        canvas.className = 'subtree-group-canvas-inner'
-        canvasWrapper.appendChild(canvas)
 
         groupWrapper.appendChild(groupTitle)
         groupWrapper.appendChild(groupMeta)
         groupWrapper.appendChild(canvasWrapper)
         targetContainer.appendChild(groupWrapper)
 
-        const hierarchyData = convertTreeToHierarchy(groupTree)
-        if (!hierarchyData) {
-            canvas.innerHTML = '<div class="error">Не вдалося побудувати цю групу</div>'
-            return
+        const treeContexts = []
+        const resetAllCanvases = () => {
+            if (!treeContexts.length) {
+                return
+            }
+            treeContexts.forEach(({ svg, zoomBehavior }) => {
+                svg.transition().duration(200).call(zoomBehavior.transform, d3.zoomIdentity)
+            })
         }
 
-        const hierarchyRoot = d3.hierarchy(hierarchyData, d => d.children)
-        const leaves = Math.max(1, hierarchyRoot.leaves().length)
-        const depth = Math.max(1, hierarchyRoot.height)
-        const leafSpacing = 38
-        const levelSpacing = 80
-        const innerWidth = Math.max(containerWidth - 120, leaves * leafSpacing)
-        const innerHeight = Math.max(320, depth * levelSpacing + 80)
-        const margin = { top: 40, right: 40, bottom: 20, left: 60 }
-        const svgWidth = innerWidth + margin.left + margin.right
-        const svgHeight = innerHeight + margin.top + margin.bottom
+        if (groupTrees.length > 1) {
+            const groupResetBtn = document.createElement('button')
+            groupResetBtn.type = 'button'
+            groupResetBtn.className = 'subtree-reset-btn group-wide'
+            groupResetBtn.textContent = ''
+            groupResetBtn.title = 'Скинути панорамування для всіх піддерев групи'
+            groupResetBtn.setAttribute('aria-label', 'Скинути панорамування для всіх піддерев групи')
+            groupResetBtn.addEventListener('click', resetAllCanvases)
+            canvasWrapper.appendChild(groupResetBtn)
+        }
 
-        canvas.style.width = `${svgWidth}px`
+        groupTrees.forEach((treeData, treeIndex) => {
+            if (!treeData || !Array.isArray(treeData.nodes) || treeData.nodes.length === 0) {
+                return
+            }
 
-        const svg = d3.select(canvas)
-            .append('svg')
-            .attr('class', 'subtree-svg zoomable')
-            .attr('width', svgWidth)
-            .attr('height', svgHeight)
+            const treeWrapper = document.createElement('div')
+            treeWrapper.className = 'subtree-canonical'
 
-        const zoomLayer = svg.append('g')
-        const plot = zoomLayer.append('g')
-            .attr('transform', `translate(${margin.left}, ${margin.top})`)
+            const prefixLabel = document.createElement('div')
+            prefixLabel.className = 'subtree-prefix-label'
+            const prefixText = treeData.prefix ? `"${treeData.prefix}"` : '(порожній префікс)'
+            prefixLabel.textContent = `Префікс: ${prefixText}`
+            treeWrapper.appendChild(prefixLabel)
 
-        const zoomBehavior = d3.zoom()
-            .scaleExtent([0.5, 4])
-            .on('zoom', (event) => {
-                zoomLayer.attr('transform', event.transform)
-            })
+            const treeCanvasWrapper = document.createElement('div')
+            treeCanvasWrapper.className = 'subtree-canonical-canvas'
+            const canvas = document.createElement('div')
+            canvas.className = 'subtree-group-canvas-inner'
+            treeCanvasWrapper.appendChild(canvas)
 
-        svg.call(zoomBehavior)
+            const hierarchyData = convertTreeToHierarchy(treeData)
+            if (!hierarchyData) {
+                canvas.innerHTML = '<div class="error">Не вдалося побудувати це піддерево</div>'
+                treeWrapper.appendChild(treeCanvasWrapper)
+                canvasWrapper.appendChild(treeWrapper)
+                return
+            }
 
-        const resetBtn = document.createElement('button')
-        resetBtn.type = 'button'
-        resetBtn.className = 'subtree-reset-btn'
-        resetBtn.textContent = '⟳'
-        resetBtn.title = 'Скинути панорамування'
-        resetBtn.setAttribute('aria-label', 'Скинути панорамування')
-        resetBtn.addEventListener('click', () => {
-            svg.transition().duration(200).call(zoomBehavior.transform, d3.zoomIdentity)
-        })
-        canvasWrapper.appendChild(resetBtn)
+            const hierarchyRoot = d3.hierarchy(hierarchyData, d => d.children)
+            const leaves = Math.max(1, hierarchyRoot.leaves().length)
+            const depth = Math.max(1, hierarchyRoot.height)
+            const leafSpacing = 38
+            const levelSpacing = 80
+            const innerWidth = Math.max(containerWidth - 120, leaves * leafSpacing)
+            const innerHeight = Math.max(320, depth * levelSpacing + 80)
+            const margin = { top: 40, right: 40, bottom: 20, left: 60 }
+            const svgWidth = innerWidth + margin.left + margin.right
+            const svgHeight = innerHeight + margin.top + margin.bottom
 
-        const treeLayout = d3.tree().size([innerWidth, innerHeight])
-        treeLayout(hierarchyRoot)
+            canvas.style.width = `${svgWidth}px`
 
-        const linkGenerator = d3.linkVertical().x(d => d.x).y(d => d.y)
-        const linkData = hierarchyRoot.links().map((link, linkIndex) => ({
-            ...link,
-            __id: `subtree-link-${groupResult?.groupId ?? index}-${linkIndex}`
-        }))
+            const svg = d3.select(canvas)
+                .append('svg')
+                .attr('class', 'subtree-svg zoomable')
+                .attr('width', svgWidth)
+                .attr('height', svgHeight)
 
-        plot.append('g')
-            .attr('class', 'subtree-links')
-            .selectAll('path')
-            .data(linkData)
-            .join('path')
-            .attr('id', d => d.__id)
-            .attr('d', linkGenerator)
-            .attr('stroke', 'rgba(148, 163, 184, 0.5)')
-            .attr('stroke-width', 1.2)
-            .attr('fill', 'none')
+            const zoomLayer = svg.append('g')
+            const plot = zoomLayer.append('g')
+                .attr('transform', `translate(${margin.left}, ${margin.top})`)
 
-        const canShowLabels = innerWidth / leaves > 28
-        if (canShowLabels) {
-            const labelGroup = plot.append('g').attr('class', 'subtree-link-labels')
-            const labelData = linkData.filter(link => {
-                const textValue = buildSuffixPreview(link.target, normalizedText, 32)
-                if (!textValue) {
-                    return false
-                }
-                const dx = link.target.x - link.source.x
-                const dy = link.target.y - link.source.y
-                const segmentLength = Math.sqrt(dx * dx + dy * dy)
-                return segmentLength >= 45
-            }).map(link => ({
+            const zoomBehavior = d3.zoom()
+                .scaleExtent([0.5, 4])
+                .on('zoom', (event) => {
+                    zoomLayer.attr('transform', event.transform)
+                })
+
+            svg.call(zoomBehavior)
+
+            const context = { svg, zoomBehavior }
+            treeContexts.push(context)
+
+            if (groupTrees.length === 1) {
+                const resetBtn = document.createElement('button')
+                resetBtn.type = 'button'
+                resetBtn.className = 'subtree-reset-btn'
+                resetBtn.textContent = ''
+                resetBtn.title = 'Скинути панорамування'
+                resetBtn.setAttribute('aria-label', 'Скинути панорамування')
+                resetBtn.addEventListener('click', () => {
+                    svg.transition().duration(200).call(zoomBehavior.transform, d3.zoomIdentity)
+                })
+                treeCanvasWrapper.appendChild(resetBtn)
+            }
+
+            const treeLayout = d3.tree().size([innerWidth, innerHeight])
+            treeLayout(hierarchyRoot)
+
+            const linkGenerator = d3.linkVertical().x(d => d.x).y(d => d.y)
+            const linkData = hierarchyRoot.links().map((link, linkIndex) => ({
                 ...link,
-                labelText: buildSuffixPreview(link.target, normalizedText, 32)
+                __id: `subtree-link-${groupResult?.groupId ?? index}-${treeIndex}-${linkIndex}`
             }))
 
-            labelGroup.selectAll('text')
-                .data(labelData)
-                .join('text')
-                .attr('class', 'subtree-link-label on-path')
-                .append('textPath')
-                .attr('href', d => `#${d.__id}`)
-                .attr('startOffset', '50%')
-                .attr('method', 'stretch')
-                .attr('side', 'left')
-                .text(d => d.labelText)
-        }
+            plot.append('g')
+                .attr('class', 'subtree-links')
+                .selectAll('path')
+                .data(linkData)
+                .join('path')
+                .attr('id', d => d.__id)
+                .attr('d', linkGenerator)
+                .attr('stroke', 'rgba(148, 163, 184, 0.5)')
+                .attr('stroke-width', 1.2)
+                .attr('fill', 'none')
 
-        const nodes = plot.append('g')
-            .attr('class', 'subtree-nodes')
-            .selectAll('g')
-            .data(hierarchyRoot.descendants())
-            .join('g')
-            .attr('transform', d => `translate(${d.x}, ${d.y})`)
+            const canShowLabels = innerWidth / leaves > 28
+            if (canShowLabels) {
+                const labelGroup = plot.append('g').attr('class', 'subtree-link-labels')
+                const labelData = linkData.filter(link => {
+                    const textValue = buildSuffixPreview(link.target, normalizedText, 32)
+                    if (!textValue) {
+                        return false
+                    }
+                    const dx = link.target.x - link.source.x
+                    const dy = link.target.y - link.source.y
+                    const segmentLength = Math.sqrt(dx * dx + dy * dy)
+                    return segmentLength >= 45
+                }).map(link => ({
+                    ...link,
+                    labelText: buildSuffixPreview(link.target, normalizedText, 32)
+                }))
 
-        nodes.append('circle')
-            .attr('r', d => (d.data.type === 'leaf' ? 4.2 : 6.5))
-            .attr('fill', colorScale(index))
-            .attr('stroke', '#0f172a')
-            .attr('stroke-width', 0.9)
+                labelGroup.selectAll('text')
+                    .data(labelData)
+                    .join('text')
+                    .attr('class', 'subtree-link-label on-path')
+                    .append('textPath')
+                    .attr('href', d => `#${d.__id}`)
+                    .attr('startOffset', '50%')
+                    .attr('method', 'stretch')
+                    .attr('side', 'left')
+                    .text(d => d.labelText)
+            }
 
-        nodes.on('mouseenter', (event, d) => {
-            showTooltip(event, tooltip, formatTooltip(d, groupResult, normalizedText))
-        }).on('mousemove', (event) => {
-            moveTooltip(event, tooltip)
-        }).on('mouseleave', () => {
-            hideTooltip(tooltip)
+            const nodes = plot.append('g')
+                .attr('class', 'subtree-nodes')
+                .selectAll('g')
+                .data(hierarchyRoot.descendants())
+                .join('g')
+                .attr('transform', d => `translate(${d.x}, ${d.y})`)
+
+            nodes.append('circle')
+                .attr('r', d => (d.data.type === 'leaf' ? 4.2 : 6.5))
+                .attr('fill', colorScale((index + treeIndex) % 10))
+                .attr('stroke', '#0f172a')
+                .attr('stroke-width', 0.9)
+
+            nodes.on('mouseenter', (event, d) => {
+                showTooltip(event, tooltip, formatTooltip(d, groupResult, normalizedText, treeData))
+            }).on('mousemove', (event) => {
+                moveTooltip(event, tooltip)
+            }).on('mouseleave', () => {
+                hideTooltip(tooltip)
+            })
+
+            treeWrapper.appendChild(treeCanvasWrapper)
+            canvasWrapper.appendChild(treeWrapper)
         })
     })
 }
@@ -277,10 +329,11 @@ function convertTreeToHierarchy(tree) {
     return root
 }
 
-function formatTooltip(node, groupResult, sourceText) {
+function formatTooltip(node, groupResult, sourceText, treeMeta) {
     if (node.data.type === 'leaf') {
         const suffix = getFullSuffix(node, sourceText)
-        return `Група #${groupResult?.displayIndex ?? groupResult?.groupId ?? '?'}\nСуфікс: ${suffix || 'невідомо'}`
+        const prefixLine = treeMeta?.prefix ? `\nПрефікс: ${treeMeta.prefix}` : ''
+        return `Група #${groupResult?.displayIndex ?? groupResult?.groupId ?? '?'}${prefixLine}\nСуфікс: ${suffix || 'невідомо'}`
     }
     return `Вузол рівня ${node.depth || 0}`
 }

@@ -234,6 +234,11 @@ button:disabled {
     color: #101828;
 }
 
+.subtree-prefix-label {
+    margin-left: 12px;
+    margin-top: 12px;
+}
+
 .subtree-nav {
     display: flex;
     justify-content: flex-end;
@@ -354,6 +359,20 @@ button:disabled {
     box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
     border: 1px solid rgba(15, 23, 42, 0.08);
     transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.subtree-reset-btn.group-wide {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    margin-left: 0;
+    z-index: 10;
+}
+
+.subtree-reset-btn::before {
+    content: '⟳';
+    font-size: 16px;
+    line-height: 1;
 }
 
 .subtree-reset-btn:hover {

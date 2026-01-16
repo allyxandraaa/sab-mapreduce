@@ -31,6 +31,28 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
         avgPrefixesPerGroup: groups.length ? (sPrefixes.length / groups.length).toFixed(2) : 0
     })
 
+    if (groups.length) {
+        console.info('[SubTree] Деталі груп', groups.map((group, index) => ({
+            order: index + 1,
+            groupId: group.id,
+            prefixCount: group.prefixes.length,
+            totalFrequency: group.totalFrequency,
+            prefixes: group.prefixes.map(prefix => ({
+                prefix: prefix.prefix,
+                frequency: prefix.frequency,
+                length: prefix.length
+            }))
+        })))
+    }
+
+    if (rounds.length) {
+        console.info('[SubTree] Розклад раундів', rounds.map((round, roundIndex) => ({
+            round: roundIndex + 1,
+            groupIds: round.map(group => group?.id),
+            prefixesPerGroup: round.map(group => group?.prefixes?.length || 0)
+        })))
+    }
+
     const subTrees = []
     const suffixSubtrees = []
 

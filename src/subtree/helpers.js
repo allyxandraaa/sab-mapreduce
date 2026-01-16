@@ -1,75 +1,16 @@
 const decoder = new TextDecoder('utf-8')
 
-const ROOT_META = {
-    type: 'root'
-}
-
-function createEmptyTree(meta = {}) {
-    return {
-        nodes: [{ id: 0, depth: 0, ...ROOT_META, ...meta }],
-        edges: []
-    }
-}
-
-export function mergeTreeStructures(trees, rootMeta = {}) {
-    if (!Array.isArray(trees) || trees.length === 0) {
-        return createEmptyTree(rootMeta)
-    }
-
-    const mergedNodes = [{ id: 0, depth: 0, ...ROOT_META, ...rootMeta }]
-    const mergedEdges = []
-    let nextNodeId = 1
-
-    trees.forEach(tree => {
-        if (!tree || !Array.isArray(tree.nodes) || tree.nodes.length === 0) {
-            return
-        }
-
-        const idMap = new Map()
-        tree.nodes.forEach(node => {
-            if (node.id === 0) {
-                idMap.set(0, 0)
-                return
-            }
-            const newId = nextNodeId++
-            mergedNodes.push({ ...node, id: newId })
-            idMap.set(node.id, newId)
-        })
-
-        if (!Array.isArray(tree.edges)) {
-            return
-        }
-
-        tree.edges.forEach(edge => {
-            const from = idMap.get(edge.from)
-            const to = idMap.get(edge.to)
-            if (from === undefined || to === undefined) {
-                return
-            }
-            mergedEdges.push({ ...edge, from, to })
-        })
-    })
-
-    return {
-        nodes: mergedNodes,
-        edges: mergedEdges
-    }
-}
-
 export function buildGroupSubTrees(text, group) {
     if (!group || !Array.isArray(group.prefixes)) {
         return {
-            suffixSubtrees: [],
-            groupTree: createEmptyTree({ type: 'group-root', groupId: group?.id ?? null })
+            suffixSubtrees: []
         }
     }
 
     const suffixSubtrees = group.prefixes.map(prefixInfo => buildSubTreeForPrefix(text, prefixInfo))
-    const groupTree = mergeTreeStructures(suffixSubtrees, { type: 'group-root', groupId: group.id })
 
     return {
-        suffixSubtrees,
-        groupTree
+        suffixSubtrees
     }
 }
 
@@ -100,61 +41,6 @@ export function buildSubTreeForPrefix(text, prefixInfo) {
         lcpArray,
         nodes,
         edges
-    }
-}
-
-export function buildGlobalSuffixTreeFromSubtrees(text, suffixSubtrees) {
-    if (typeof text !== 'string' || text.length === 0 || !Array.isArray(suffixSubtrees) || suffixSubtrees.length === 0) {
-        return {
-            suffixCount: 0,
-            suffixArray: [],
-            lcpArray: [],
-            nodes: [],
-            edges: []
-        }
-    }
-
-    const suffixPositions = new Set()
-    suffixSubtrees.forEach(tree => {
-        if (!tree || !Array.isArray(tree.nodes)) {
-            return
-        }
-
-        tree.nodes.forEach(node => {
-            if (node && node.type === 'leaf' && Number.isInteger(node.suffixStart)) {
-                suffixPositions.add(node.suffixStart)
-            }
-        })
-    })
-
-    if (suffixPositions.size === 0) {
-        return {
-            suffixCount: 0,
-            suffixArray: [],
-            lcpArray: [],
-            nodes: [],
-            edges: []
-        }
-    }
-
-    const suffixArray = buildSuffixArray(text, Array.from(suffixPositions))
-    const lcpArray = buildLcpArray(text, suffixArray)
-    const { nodes, edges } = buildSuffixTreeStructure(text, suffixArray, lcpArray)
-    const suffixes = suffixArray.map(start => ({
-        start,
-        end: text.length,
-        length: text.length - start,
-        preview: text.slice(start, Math.min(text.length, start + 32))
-    }))
-
-    return {
-        suffixCount: suffixArray.length,
-        suffixArray,
-        lcpArray,
-        nodes,
-        edges,
-        suffixes,
-        text
     }
 }
 

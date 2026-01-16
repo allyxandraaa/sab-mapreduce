@@ -49,16 +49,17 @@ document.addEventListener('DOMContentLoaded', function () {
     })
 
     let latestSubTreeResult = null
+    let latestGroupPages = []
     let currentGroupIndex = 0
 
     const renderCurrentGroup = () => {
-        if (!latestSubTreeResult || !Array.isArray(latestSubTreeResult.subTrees) || !subtreeCanvas) {
+        if (!Array.isArray(latestGroupPages) || latestGroupPages.length === 0 || !subtreeCanvas) {
+            subtreeCanvas.innerHTML = '<div class="loading">Піддерева ще не сформовані</div>'
             return
         }
-        const groups = latestSubTreeResult.subTrees
-        const safeIndex = Math.min(Math.max(currentGroupIndex, 0), Math.max(groups.length - 1, 0))
+        const safeIndex = Math.min(Math.max(currentGroupIndex, 0), Math.max(latestGroupPages.length - 1, 0))
         currentGroupIndex = safeIndex
-        const selectedGroup = groups[safeIndex]
+        const selectedGroup = latestGroupPages[safeIndex]
         const displayGroup = {
             ...selectedGroup,
             displayIndex: safeIndex + 1
@@ -66,22 +67,22 @@ document.addEventListener('DOMContentLoaded', function () {
         displaySubTreeVisualization([displayGroup], subtreeCanvas, decodedText)
 
         if (navCurrentLabel) {
-            navCurrentLabel.textContent = String(groups.length ? safeIndex + 1 : 0)
+            navCurrentLabel.textContent = String(latestGroupPages.length ? safeIndex + 1 : 0)
         }
         if (navTotalLabel) {
-            navTotalLabel.textContent = String(Math.max(groups.length, 1))
+            navTotalLabel.textContent = String(Math.max(latestGroupPages.length, 1))
         }
         if (navPrevBtn) {
-            navPrevBtn.disabled = groups.length <= 1 || safeIndex === 0
+            navPrevBtn.disabled = latestGroupPages.length <= 1 || safeIndex === 0
         }
         if (navNextBtn) {
-            navNextBtn.disabled = groups.length <= 1 || safeIndex >= groups.length - 1
+            navNextBtn.disabled = latestGroupPages.length <= 1 || safeIndex >= latestGroupPages.length - 1
         }
     }
 
     if (navPrevBtn) {
         navPrevBtn.addEventListener('click', () => {
-            if (!latestSubTreeResult || currentGroupIndex === 0) {
+            if (!latestGroupPages || latestGroupPages.length === 0 || currentGroupIndex === 0) {
                 return
             }
             currentGroupIndex -= 1
@@ -91,10 +92,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (navNextBtn) {
         navNextBtn.addEventListener('click', () => {
-            if (!latestSubTreeResult) {
+            if (!latestGroupPages || latestGroupPages.length === 0) {
                 return
             }
-            const maxIndex = latestSubTreeResult.subTrees.length - 1
+            const maxIndex = latestGroupPages.length - 1
             if (currentGroupIndex >= maxIndex) {
                 return
             }
@@ -139,6 +140,11 @@ document.addEventListener('DOMContentLoaded', function () {
             
             displayStatus(buildStatus, 'loading', `Обчислення S-префіксів (${splits.length} сплітів)...`)
             const allSPrefixes = await processIteratively(splits, config)
+            console.info('[SPrefix] Отримано фінальний список S-префіксів', {
+                totalPrefixes: allSPrefixes.length,
+                totalFrequency: allSPrefixes.reduce((sum, sp) => sum + (sp?.frequency || 0), 0),
+                prefixes: allSPrefixes
+            })
 
             displayStatus(buildStatus, 'loading', 'Групування та побудова піддерев...')
             let subTreeResult = { groups: [], rounds: [], subTrees: [], suffixSubtrees: [] }
@@ -164,14 +170,37 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const buildTime = (performance.now() - startTime) / 1000
             const suffixSubtrees = Array.isArray(subTreeResult.suffixSubtrees) ? subTreeResult.suffixSubtrees : []
-            const resolvedSuffixCount = suffixSubtrees.reduce((sum, tree) => sum + (tree?.suffixCount || 0), 0) || fallbackTotalSuffixes
+            const aggregatedTreeStats = suffixSubtrees.reduce((acc, tree) => {
+                if (!tree) {
+                    return acc
+                }
+                const nodeCount = Array.isArray(tree?.nodes) ? tree.nodes.length : 0
+                const edgeCount = Array.isArray(tree?.edges) ? tree.edges.length : 0
+                const treeDepth = Array.isArray(tree?.nodes) && tree.nodes.length
+                    ? tree.nodes.reduce((max, node) => Math.max(max, node?.depth ?? 0), 0)
+                    : 0
+                const suffixCount = typeof tree?.suffixCount === 'number' ? tree.suffixCount : 0
+
+                acc.totalNodes += nodeCount
+                acc.totalEdges += edgeCount
+                acc.maxDepth = Math.max(acc.maxDepth, treeDepth)
+                acc.totalSuffixes += suffixCount
+                return acc
+            }, { totalNodes: 0, totalEdges: 0, maxDepth: 0, totalSuffixes: 0 })
+
+            const hasTreeStats = suffixSubtrees.length > 0
+            const fallbackEdgeCount = allSPrefixes.reduce((sum, sp) => sum + (sp?.frequency || 0), 0)
+            const fallbackMaxDepth = allSPrefixes.reduce((max, sp) => Math.max(max, sp?.length || 0), 0)
+
+            const resolvedSuffixCount = hasTreeStats ? aggregatedTreeStats.totalSuffixes : fallbackTotalSuffixes
 
             dgstTree = {
-                totalNodes: allSPrefixes.length,
-                totalEdges: allSPrefixes.reduce((sum, sp) => sum + sp.frequency, 0),
-                maxDepth: Math.max(...allSPrefixes.map(sp => sp.length), 0),
+                totalNodes: hasTreeStats ? aggregatedTreeStats.totalNodes : allSPrefixes.length,
+                totalEdges: hasTreeStats ? aggregatedTreeStats.totalEdges : fallbackEdgeCount,
+                maxDepth: hasTreeStats ? aggregatedTreeStats.maxDepth : fallbackMaxDepth,
                 totalSuffixes: resolvedSuffixCount,
                 buildTime: buildTime,
+                memoryLimit: config?.memoryLimit ?? null,
                 sPrefixes: allSPrefixes,
                 splits: splits.length,
                 subTrees: subTreeResult.subTrees,
@@ -181,6 +210,17 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             
             latestSubTreeResult = subTreeResult
+            latestGroupPages = Array.isArray(subTreeResult.groups)
+                ? subTreeResult.groups.map((group, idx) => {
+                    const match = subTreeResult.subTrees.find(res => res?.groupId === group.id)
+                    return {
+                        displayIndex: idx + 1,
+                        groupId: group.id,
+                        totalFrequency: group.totalFrequency,
+                        suffixSubtrees: Array.isArray(match?.suffixSubtrees) ? match.suffixSubtrees : []
+                    }
+                })
+                : []
             displayStats(dgstTree)
             currentGroupIndex = 0
             renderCurrentGroup()
@@ -463,6 +503,7 @@ document.addEventListener('DOMContentLoaded', function () {
         config = null
         decodedText = ''
         latestSubTreeResult = null
+        latestGroupPages = []
         currentGroupIndex = 0
         displayStats(null)
         if (subtreeCanvas) {
