@@ -71,8 +71,7 @@ self.onmessage = function(event) {
 
             const text = decodeSharedBuffer(sharedBuffer)
             const options = {
-                useFrequencyTrie: event.data.useFrequencyTrie !== false,
-                useLCPRange: event.data.useLCPRange || false
+                useFrequencyTrie: event.data.useFrequencyTrie !== false
             }
             const { suffixSubtrees } = buildGroupSubTrees(text, group, options)
 

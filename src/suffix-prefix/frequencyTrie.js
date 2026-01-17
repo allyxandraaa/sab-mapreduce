@@ -267,14 +267,3 @@ export class FrequencyTrie {
         return positions
     }
 }
-
-export function calculateMaxPrefixLength(textLength, frequencyLimit, alphabetSize = 256) {
-    if (frequencyLimit <= 0 || textLength <= 0) return 1
-    const ratio = textLength / frequencyLimit
-    if (ratio <= 1) return 1
-    return Math.ceil(Math.log(ratio) / Math.log(alphabetSize))
-}
-
-export function calculateTailLength(textLength, frequencyLimit, alphabetSize = 256) {
-    return calculateMaxPrefixLength(textLength, frequencyLimit, alphabetSize)
-}

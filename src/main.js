@@ -131,7 +131,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 windowSize: 1,
                 numWorkers: numWorkers,
                 useFrequencyTrie: true,
-                useLCPRange: false,
                 useUTS: true
             })
             
@@ -385,8 +384,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     phase: 'subtree',
                     sharedBuffer,
                     group,
-                    useFrequencyTrie: config.useFrequencyTrie,
-                    useLCPRange: config.useLCPRange
+                    useFrequencyTrie: config.useFrequencyTrie
                 })
             })
         })
