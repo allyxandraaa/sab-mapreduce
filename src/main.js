@@ -4,7 +4,8 @@ import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 import { buildSubTrees } from './subtree/builder.js'
 import { UTSManager, DEFAULT_TERMINAL } from './suffix-prefix/uts.js'
-import { mergeFrequencyTries } from './merge/shuffle.js'
+import { shuffleByKey } from './merge/shuffle.js'
+import { FrequencyTrie } from './suffix-prefix/frequencyTrie.js'
 
 let dgstTree = null
 let currentFile = null
@@ -134,7 +135,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 useUTS: true
             })
             
-            // Обробка тексту з UTS (Unique Terminal Symbol) згідно з DGST paper
             if (config.useUTS) {
                 utsManager = new UTSManager()
                 utsManager.initializeSingle(rawText)
@@ -148,7 +148,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 decodedText = rawText
             }
             
-            // Створюємо SharedArrayBuffer з обробленим текстом
             const processedBytes = new TextEncoder().encode(decodedText)
             sharedBuffer = new SharedArrayBuffer(processedBytes.byteLength)
             const view = new Uint8Array(sharedBuffer)
@@ -261,8 +260,8 @@ document.addEventListener('DOMContentLoaded', function () {
     })
     
     async function runReduceWorkers(partitions) {
-        if (workerPool.length === 0) {
-            initializeWorkerPool(partitions.length)
+        if (workerPool.length !== partitions.length) {
+            initializeWorkerPool(partitions.length || 1)
         }
 
         const promises = []
@@ -274,7 +273,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 continue
             }
 
-            const worker = workerPool[i % workerPool.length]
+            const worker = workerPool[i]
 
             const promise = new Promise((resolve, reject) => {
                 const handler = (event) => {
@@ -485,8 +484,9 @@ document.addEventListener('DOMContentLoaded', function () {
             })
 
             const mapResults = await runMapWorkers(updatedSplits, config, targetPrefixes)
-            const { mergeFrequencyTries: mergeTries } = await import('./merge/shuffle.js')
-            const mergedTrie = mergeTries(mapResults)
+            const partitions = shuffleByKey(mapResults, config.numWorkers)
+            const reduceResults = await runReduceWorkers(partitions)
+            const mergedTrie = buildTrieFromReduceResults(reduceResults)
 
             const { accepted, needsExtension } = mergedTrie.partitionByFrequency(config.memoryLimit, windowSize)
 
@@ -538,6 +538,25 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         return result
+    }
+
+    function buildTrieFromReduceResults(reduceResults) {
+        const trie = new FrequencyTrie()
+        if (!Array.isArray(reduceResults)) {
+            return trie
+        }
+
+        reduceResults.forEach(result => {
+            const prefixes = result?.sPrefixes || []
+            prefixes.forEach(sp => {
+                if (!sp || !sp.prefix) return
+                const freq = sp.frequency || 0
+                if (freq <= 0) return
+                trie.insert(sp.prefix, freq)
+            })
+        })
+
+        return trie
     }
 
     async function handleFileSelect(file) {
