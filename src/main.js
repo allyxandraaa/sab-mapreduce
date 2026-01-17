@@ -3,11 +3,14 @@ import { displayFileInfo, displayStatus, displaySubTreeVisualization, displaySta
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 import { buildSubTrees } from './subtree/builder.js'
+import { UTSManager, DEFAULT_TERMINAL } from './suffix-prefix/uts.js'
+import { mergeFrequencyTries } from './merge/shuffle.js'
 
 let dgstTree = null
 let currentFile = null
 let sharedBuffer = null
 let config = null
+let utsManager = null
 const textDecoder = new TextDecoder('utf-8')
 let decodedText = ''
 
@@ -119,18 +122,39 @@ document.addEventListener('DOMContentLoaded', function () {
             displayStatus(buildStatus, 'loading', 'Завантаження файлу...')
             const arrayBuffer = await readFileAsArrayBuffer(currentFile)
             const fileBytes = new Uint8Array(arrayBuffer)
-            sharedBuffer = new SharedArrayBuffer(arrayBuffer.byteLength)
-            const view = new Uint8Array(sharedBuffer)
-            view.set(fileBytes)
-            decodedText = textDecoder.decode(fileBytes)
+            let rawText = textDecoder.decode(fileBytes)
             
             displayStatus(buildStatus, 'loading', 'Ініціалізація конфігурації...')
             const numWorkers = parseInt(numWorkersInput.value) || 4
             config = new DGSTConfig({ 
                 windowSize: 1,
-                numWorkers: numWorkers
+                numWorkers: numWorkers,
+                useFrequencyTrie: true,
+                useLCPRange: false,
+                useUTS: true
             })
-            await config.initialize(arrayBuffer.byteLength)
+            
+            // Обробка тексту з UTS (Unique Terminal Symbol) згідно з DGST paper
+            if (config.useUTS) {
+                utsManager = new UTSManager()
+                utsManager.initializeSingle(rawText)
+                decodedText = utsManager.getMergedText()
+                console.info('[UTS] Додано термінальний символ', {
+                    originalLength: rawText.length,
+                    processedLength: decodedText.length,
+                    terminalSymbol: DEFAULT_TERMINAL
+                })
+            } else {
+                decodedText = rawText
+            }
+            
+            // Створюємо SharedArrayBuffer з обробленим текстом
+            const processedBytes = new TextEncoder().encode(decodedText)
+            sharedBuffer = new SharedArrayBuffer(processedBytes.byteLength)
+            const view = new Uint8Array(sharedBuffer)
+            view.set(processedBytes)
+            
+            await config.initialize(processedBytes.byteLength)
             
             initializeWorkerPool(config.numWorkers)
             
@@ -361,7 +385,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 worker.postMessage({
                     phase: 'subtree',
                     sharedBuffer,
-                    group
+                    group,
+                    useFrequencyTrie: config.useFrequencyTrie,
+                    useLCPRange: config.useLCPRange
                 })
             })
         })
@@ -443,6 +469,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     async function processIteratively(splits, config) {
         let windowSize = config.windowSize
+        const windowStepSize = config.windowStepSize || 1
         let targetPrefixes = null
         const finalPrefixes = []
 
@@ -450,7 +477,7 @@ document.addEventListener('DOMContentLoaded', function () {
             config.windowSize = windowSize
 
             const updatedSplits = splits.map(split => {
-                const tail = windowSize - 1
+                const tail = Math.max(windowSize - 1, config.tailLength || windowSize)
                 return {
                     ...split,
                     tailedEnd: Math.min(split.end + tail, sharedBuffer.byteLength)
@@ -458,36 +485,59 @@ document.addEventListener('DOMContentLoaded', function () {
             })
 
             const mapResults = await runMapWorkers(updatedSplits, config, targetPrefixes)
-            const { shuffleByKey, mergeReduceResults } = await import('./merge/shuffle.js')
-            const shuffledPartitions = shuffleByKey(mapResults, config.numWorkers)
-            const reduceResults = await runReduceWorkers(shuffledPartitions)
-            const aggregated = mergeReduceResults(reduceResults)
+            const { mergeFrequencyTries: mergeTries } = await import('./merge/shuffle.js')
+            const mergedTrie = mergeTries(mapResults)
 
-            const nextRoundTargets = new Set()
-            let hasProblematic = false
+            const { accepted, needsExtension } = mergedTrie.partitionByFrequency(config.memoryLimit, windowSize)
 
-            aggregated.forEach(sp => {
-                if (sp.frequency > config.memoryLimit) {
-                    nextRoundTargets.add(sp.prefix)
-                    hasProblematic = true
-                } else {
-                    finalPrefixes.push({ prefix: sp.prefix, frequency: sp.frequency, length: windowSize })
-                }
+            accepted.forEach(sp => {
+                finalPrefixes.push({ prefix: sp.prefix, frequency: sp.frequency, length: windowSize })
             })
 
-            if (!hasProblematic) {
+            if (needsExtension.length === 0) {
                 break
             }
 
-            targetPrefixes = nextRoundTargets
-            windowSize++
+            targetPrefixes = new Set(needsExtension.map(p => p.prefix))
+            windowSize += windowStepSize
+
+            console.info('[SPrefix] Ітерація з Frequency Trie', {
+                windowSize,
+                acceptedCount: accepted.length,
+                needsExtensionCount: needsExtension.length
+            })
 
             if (windowSize > 100) {
                 throw new Error('Досягнуто максимальний розмір вікна. Неможливо обробити всі префікси в межах memoryLimit.')
             }
         }
 
-        return finalPrefixes
+        return prunePrefixes(finalPrefixes)
+    }
+
+    function prunePrefixes(prefixes) {
+        if (prefixes.length <= 1) return prefixes
+
+        const sorted = [...prefixes].sort((a, b) => a.length - b.length)
+        const result = []
+        const covered = new Set()
+
+        for (const prefix of sorted) {
+            let isCovered = false
+            for (const coveredPrefix of covered) {
+                if (prefix.prefix.startsWith(coveredPrefix)) {
+                    isCovered = true
+                    break
+                }
+            }
+
+            if (!isCovered) {
+                result.push(prefix)
+                covered.add(prefix.prefix)
+            }
+        }
+
+        return result
     }
 
     async function handleFileSelect(file) {
@@ -501,6 +551,7 @@ document.addEventListener('DOMContentLoaded', function () {
         dgstTree = null
         sharedBuffer = null
         config = null
+        utsManager = null
         decodedText = ''
         latestSubTreeResult = null
         latestGroupPages = []

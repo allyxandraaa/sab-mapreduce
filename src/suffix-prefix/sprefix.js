@@ -1,45 +1,69 @@
+import { FrequencyTrie } from './frequencyTrie.js'
+import { isTerminalSymbol } from './uts.js'
+
 const decoder = new TextDecoder('utf-8')
 
 export function computeSPrefixes(splitView, start, end, tailedEnd, windowSize, targetPrefixes) {
-    const localCounts = new Map()
     const effectiveEnd = end - start
     const effectiveTailedEnd = tailedEnd - start
+    
+    return computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, windowSize, targetPrefixes)
+}
+
+function computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, windowSize, targetPrefixes) {
+    const trie = new FrequencyTrie()
+    const targetSet = targetPrefixes && targetPrefixes.length > 0 ? new Set(targetPrefixes) : null
     
     for (let i = 0; i < effectiveEnd; i++) {
         if (i + windowSize > effectiveTailedEnd) break
         
         const slice = splitView.subarray(i, i + windowSize)
         
-        let hasNewline = false
+        let hasInvalidChar = false
         for (let j = 0; j < slice.length; j++) {
-            if (slice[j] === 0x0A || slice[j] === 0x0D) {
-                hasNewline = true
+            const byte = slice[j]
+            if (byte === 0x0A || byte === 0x0D) {
+                hasInvalidChar = true
+                break
+            }
+            if (byte === 0x24 && j < slice.length - 1) {
+                hasInvalidChar = true
                 break
             }
         }
-        if (hasNewline) continue
+        if (hasInvalidChar) continue
         
         const copy = new Uint8Array(slice)
         const prefix = decoder.decode(copy)
         
-        if (targetPrefixes && targetPrefixes.length > 0) {
-            const matches = targetPrefixes.some(target => prefix.startsWith(target))
+        let hasUTS = false
+        for (let j = 0; j < prefix.length - 1; j++) {
+            if (isTerminalSymbol(prefix[j])) {
+                hasUTS = true
+                break
+            }
+        }
+        if (hasUTS) continue
+        
+        if (targetSet) {
+            let matches = false
+            for (const target of targetSet) {
+                if (prefix.startsWith(target)) {
+                    matches = true
+                    break
+                }
+            }
             if (!matches) continue
         }
         
-        localCounts.set(prefix, (localCounts.get(prefix) || 0) + 1)
+        trie.insert(prefix)
     }
     
-    const result = []
-    for (const [prefix, frequency] of localCounts.entries()) {
-        result.push({
-            prefix: prefix,
-            frequency: frequency,
-            length: windowSize
-        })
+    const prefixes = trie.collectPrefixes(windowSize)
+    return {
+        trie: trie.serialize(),
+        sPrefixes: prefixes
     }
-    
-    return result
 }
 
 export function filterSPrefixesByFrequency(sPrefixes, minFrequency = 2) {
@@ -48,5 +72,21 @@ export function filterSPrefixesByFrequency(sPrefixes, minFrequency = 2) {
 
 export function sortSPrefixesByFrequency(sPrefixes) {
     return [...sPrefixes].sort((a, b) => b.frequency - a.frequency)
+}
+
+export function mergeFrequencyTries(serializedTries) {
+    const mergedTrie = new FrequencyTrie()
+    for (const serialized of serializedTries) {
+        if (!serialized) continue
+        const trie = FrequencyTrie.deserialize(serialized)
+        mergedTrie.merge(trie)
+    }
+    return mergedTrie
+}
+
+export function partitionPrefixesByFrequency(trie, frequencyLimit, currentWindowSize) {
+    const { accepted, needsExtension } = trie.partitionByFrequency(frequencyLimit, currentWindowSize)
+    const extensionSet = new Set(needsExtension.map(p => p.prefix))
+    return { accepted, needsExtension: extensionSet }
 }
 

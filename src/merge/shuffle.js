@@ -1,3 +1,5 @@
+import { FrequencyTrie } from '../suffix-prefix/frequencyTrie.js'
+
 /**
  * Обчислює хеш-значення для префікса.
  * Використовується для детермінованого розподілу префіксів по партиціях.
@@ -17,9 +19,12 @@ export function shuffleByKey(results, numPartitions = 4) {
     const partitions = Array.from({ length: numPartitions }, () => [])
     
     results.forEach(result => {
-        if (!result || !result.sPrefixes) return
+        if (!result) return
         
-        result.sPrefixes.forEach(sp => {
+        // Підтримка нового формату з sPrefixes
+        const sPrefixes = result.sPrefixes || []
+        
+        sPrefixes.forEach(sp => {
             const key = sp.prefix
             const partitionIndex = hashPrefix(key) % numPartitions
             partitions[partitionIndex].push({
@@ -31,6 +36,24 @@ export function shuffleByKey(results, numPartitions = 4) {
     })
     
     return partitions
+}
+
+/**
+ * Об'єднує Frequency Tries від різних сплітів.
+ * Згідно з DGST paper (Section 5.2) - об'єднання локальних tries.
+ * @param {Array<Object>} results - результати від воркерів з серіалізованими tries
+ * @returns {FrequencyTrie}
+ */
+export function mergeFrequencyTries(results) {
+    const mergedTrie = new FrequencyTrie()
+    
+    results.forEach(result => {
+        if (!result || !result.trie) return
+        const trie = FrequencyTrie.deserialize(result.trie)
+        mergedTrie.merge(trie)
+    })
+    
+    return mergedTrie
 }
 
 

@@ -9,7 +9,7 @@ self.onmessage = function(event) {
         if (phase === 'divide') {
             const splitView = createSplitView(sharedBuffer, split)
             
-            const sPrefixes = computeSPrefixes(
+            const result = computeSPrefixes(
                 splitView,
                 split.start,
                 split.end,
@@ -18,12 +18,17 @@ self.onmessage = function(event) {
                 event.data.targetPrefixes || null
             )
             
+            // Результат тепер містить trie та sPrefixes
+            const sPrefixes = result.sPrefixes || result
+            const trie = result.trie || null
+            
             self.postMessage({
                 type: 'success',
                 phase: 'divide',
                 splitIndex: split.index,
                 result: {
                     sPrefixes: sPrefixes,
+                    trie: trie,
                     splitInfo: {
                         start: split.start,
                         end: split.end,
@@ -65,7 +70,11 @@ self.onmessage = function(event) {
             }
 
             const text = decodeSharedBuffer(sharedBuffer)
-            const { suffixSubtrees } = buildGroupSubTrees(text, group)
+            const options = {
+                useFrequencyTrie: event.data.useFrequencyTrie !== false,
+                useLCPRange: event.data.useLCPRange || false
+            }
+            const { suffixSubtrees } = buildGroupSubTrees(text, group, options)
 
             self.postMessage({
                 type: 'success',
