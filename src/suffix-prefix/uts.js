@@ -1,15 +1,27 @@
 const PRIVATE_USE_START = 0xE000
 const PRIVATE_USE_END = 0xF8FF
+const VISIBLE_TERMINAL_CANDIDATES = Object.freeze([
+    '$', '&', '#', '@', '%', '§', '¶', '¤', '†', '‡', '•', '☼'
+])
 
-export const DEFAULT_TERMINAL = String.fromCharCode(PRIVATE_USE_START)
+function buildVisiblePool(customVisible = null) {
+    const preferred = Array.isArray(customVisible) && customVisible.length
+        ? customVisible
+        : VISIBLE_TERMINAL_CANDIDATES
 
-function buildTerminalPool() {
+    return preferred.filter(symbol => typeof symbol === 'string' && symbol.length > 0)
+}
+
+function buildPrivatePool() {
     const pool = []
     for (let code = PRIVATE_USE_START; code <= PRIVATE_USE_END; code++) {
         pool.push(String.fromCharCode(code))
     }
     return pool
 }
+
+const PRIVATE_TERMINAL_POOL = buildPrivatePool()
+export const DEFAULT_TERMINAL = PRIVATE_TERMINAL_POOL[0]
 
 export function isTerminalSymbol(char) {
     if (char === undefined || char === null) {
@@ -38,7 +50,10 @@ export class UTSManager {
         this.mergedText = ''
         this.boundaries = []
         this.terminalSymbol = options.terminalSymbol || DEFAULT_TERMINAL
-        this.terminalPool = buildTerminalPool()
+        this.terminalPool = [...PRIVATE_TERMINAL_POOL]
+        this.visiblePool = buildVisiblePool(options.visibleTerminals)
+        this.displayMap = new Map()
+        this.visibleIndex = 0
     }
 
     reset() {
@@ -95,10 +110,31 @@ export class UTSManager {
         return [...this.boundaries]
     }
 
+    getVisibleRepresentation(char) {
+        if (typeof char !== 'string' || char.length === 0) {
+            return ''
+        }
+        if (!isTerminalSymbol(char)) {
+            return char
+        }
+        if (this.displayMap.has(char)) {
+            return this.displayMap.get(char)
+        }
+
+        const visibleSymbol = this.visiblePool[this.visibleIndex % this.visiblePool.length] || '?'
+        this.visibleIndex += 1
+        this.displayMap.set(char, visibleSymbol)
+        return visibleSymbol
+    }
+
     _pickAvailableTerminal(text = '') {
         const haystack = typeof text === 'string' ? text : ''
         for (const symbol of this.terminalPool) {
             if (!haystack.includes(symbol)) {
+                if (!this.displayMap.has(symbol)) {
+                    const visibleSymbol = this.visiblePool[this.displayMap.size % this.visiblePool.length] || '?'
+                    this.displayMap.set(symbol, visibleSymbol)
+                }
                 return symbol
             }
         }

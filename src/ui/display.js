@@ -252,7 +252,7 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
             if (canShowLabels) {
                 const labelGroup = plot.append('g').attr('class', 'subtree-link-labels')
                 const labelData = linkData.filter(link => {
-                    const textValue = buildSuffixPreview(link.target, normalizedText, 32)
+                    const textValue = (link.target?.data?.edgeLabel || '').trim()
                     if (!textValue) {
                         return false
                     }
@@ -262,7 +262,7 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
                     return segmentLength >= 45
                 }).map(link => ({
                     ...link,
-                    labelText: buildSuffixPreview(link.target, normalizedText, 32)
+                    labelText: (link.target?.data?.edgeLabel || '').slice(0, 32)
                 }))
 
                 labelGroup.selectAll('text')
