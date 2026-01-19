@@ -16,8 +16,8 @@
             <div class="section">
                 <h2>Завантаження файлу</h2>
                 <label class="file-upload" id="file-upload-area" for="file-input">
-                    <p>Перетягніть файл сюди або натисніть для вибору</p>
-                    <input type="file" id="file-input" accept=".txt">
+                    <p>Перетягніть один чи кілька файлів сюди або натисніть для вибору</p>
+                    <input type="file" id="file-input" accept=".txt" multiple>
                 </label>
                 <div id="file-info" class="file-info hidden"></div>
                 
@@ -44,7 +44,9 @@
                 <div class="subtree-nav">
                     <button id="subtree-prev" class="subtree-nav-btn" disabled>← Попередня</button>
                     <div class="subtree-nav-label">
-                        <span id="subtree-current-index">1</span>/<span id="subtree-total-count">1</span>
+                        <input id="subtree-current-index" class="subtree-nav-input" type="number" min="1" value="1">
+                        <span class="subtree-nav-separator">/</span>
+                        <span id="subtree-total-count">1</span>
                     </div>
                     <button id="subtree-next" class="subtree-nav-btn" disabled>Наступна →</button>
                 </div>

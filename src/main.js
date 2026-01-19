@@ -3,17 +3,19 @@ import { displayFileInfo, displayStatus, displaySubTreeVisualization, displaySta
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 import { buildSubTrees } from './subtree/builder.js'
-import { UTSManager, DEFAULT_TERMINAL } from './suffix-prefix/uts.js'
+import { UTSManager, toVisibleText } from './suffix-prefix/uts.js'
 import { shuffleByKey } from './merge/shuffle.js'
 import { FrequencyTrie } from './suffix-prefix/frequencyTrie.js'
 
 let dgstTree = null
-let currentFile = null
+let currentFiles = []
 let sharedBuffer = null
 let config = null
 let utsManager = null
+let fileBoundaries = []
 const textDecoder = new TextDecoder('utf-8')
 let decodedText = ''
+let visibleMergedText = ''
 
 document.addEventListener('DOMContentLoaded', function () {
     const fileInput = document.getElementById('file-input')
@@ -25,7 +27,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const subtreeCanvas = document.getElementById('subtrees-visualization')
     const navPrevBtn = document.getElementById('subtree-prev')
     const navNextBtn = document.getElementById('subtree-next')
-    const navCurrentLabel = document.getElementById('subtree-current-index')
+    const navCurrentInput = document.getElementById('subtree-current-index')
     const navTotalLabel = document.getElementById('subtree-total-count')
 
     fileUploadArea.addEventListener('dragover', (e) => {
@@ -42,13 +44,14 @@ document.addEventListener('DOMContentLoaded', function () {
         fileUploadArea.classList.remove('dragover')
         if (e.dataTransfer.files.length > 0) {
             fileInput.files = e.dataTransfer.files
-            handleFileSelect(e.dataTransfer.files[0])
+            handleFileSelect(Array.from(e.dataTransfer.files))
         }
     })
 
     fileInput.addEventListener('change', async function () {
-        if (this.files[0]) {
-            await handleFileSelect(this.files[0])
+        const files = Array.from(this.files || [])
+        if (files.length) {
+            await handleFileSelect(files)
         }
     })
 
@@ -68,10 +71,14 @@ document.addEventListener('DOMContentLoaded', function () {
             ...selectedGroup,
             displayIndex: safeIndex + 1
         }
-        displaySubTreeVisualization([displayGroup], subtreeCanvas, decodedText)
+        const textForRender = typeof visibleMergedText === 'string' ? visibleMergedText : ''
+        displaySubTreeVisualization([displayGroup], subtreeCanvas, textForRender)
 
-        if (navCurrentLabel) {
-            navCurrentLabel.textContent = String(latestGroupPages.length ? safeIndex + 1 : 0)
+        if (navCurrentInput) {
+            navCurrentInput.disabled = latestGroupPages.length === 0
+            navCurrentInput.min = latestGroupPages.length ? 1 : 0
+            navCurrentInput.max = Math.max(latestGroupPages.length, 1)
+            navCurrentInput.value = latestGroupPages.length ? String(safeIndex + 1) : ''
         }
         if (navTotalLabel) {
             navTotalLabel.textContent = String(Math.max(latestGroupPages.length, 1))
@@ -84,13 +91,40 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    const jumpToGroupIndex = (indexValue) => {
+        if (!latestGroupPages || latestGroupPages.length === 0) {
+            return
+        }
+        const maxIndex = latestGroupPages.length - 1
+        const nextIndex = Math.min(Math.max(indexValue, 0), maxIndex)
+        if (nextIndex === currentGroupIndex) {
+            if (navCurrentInput) {
+                navCurrentInput.value = String(nextIndex + 1)
+            }
+            return
+        }
+        currentGroupIndex = nextIndex
+        renderCurrentGroup()
+    }
+
+    const parseInputIndex = () => {
+        if (!navCurrentInput) {
+            return
+        }
+        const rawValue = parseInt(navCurrentInput.value, 10)
+        if (Number.isNaN(rawValue)) {
+            navCurrentInput.value = latestGroupPages && latestGroupPages.length ? String(currentGroupIndex + 1) : ''
+            return
+        }
+        jumpToGroupIndex(rawValue - 1)
+    }
+
     if (navPrevBtn) {
         navPrevBtn.addEventListener('click', () => {
             if (!latestGroupPages || latestGroupPages.length === 0 || currentGroupIndex === 0) {
                 return
             }
-            currentGroupIndex -= 1
-            renderCurrentGroup()
+            jumpToGroupIndex(currentGroupIndex - 1)
         })
     }
 
@@ -103,14 +137,23 @@ document.addEventListener('DOMContentLoaded', function () {
             if (currentGroupIndex >= maxIndex) {
                 return
             }
-            currentGroupIndex += 1
-            renderCurrentGroup()
+            jumpToGroupIndex(currentGroupIndex + 1)
+        })
+    }
+
+    if (navCurrentInput) {
+        navCurrentInput.addEventListener('change', parseInputIndex)
+        navCurrentInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault()
+                parseInputIndex()
+            }
         })
     }
 
     buildBtn.addEventListener('click', async function () {
-        if (!currentFile) {
-            alert('Файл не вибрано')
+        if (!currentFiles || currentFiles.length === 0) {
+            alert('Файли не вибрані')
             return
         }
         
@@ -120,32 +163,37 @@ document.addEventListener('DOMContentLoaded', function () {
         displayStatus(buildStatus, 'loading', 'Побудова DGST...')
         
         try {
-            displayStatus(buildStatus, 'loading', 'Завантаження файлу...')
-            const arrayBuffer = await readFileAsArrayBuffer(currentFile)
-            const fileBytes = new Uint8Array(arrayBuffer)
-            let rawText = textDecoder.decode(fileBytes)
-            
+            const selectedFiles = Array.isArray(currentFiles) ? [...currentFiles] : []
+            displayStatus(buildStatus, 'loading', `Завантаження ${selectedFiles.length} файлів...`)
+            const buffers = await Promise.all(selectedFiles.map(file => readFileAsArrayBuffer(file)))
+            const fileChunks = buffers.map((buffer, index) => {
+                const bytes = new Uint8Array(buffer)
+                const text = textDecoder.decode(bytes)
+                return {
+                    name: selectedFiles[index]?.name || `file-${index}`,
+                    text,
+                    byteLength: bytes.byteLength
+                }
+            })
+
             displayStatus(buildStatus, 'loading', 'Ініціалізація конфігурації...')
             const numWorkers = parseInt(numWorkersInput.value) || 4
             config = new DGSTConfig({ 
                 windowSize: 1,
                 numWorkers: numWorkers,
-                useFrequencyTrie: true,
-                useUTS: true
+                useFrequencyTrie: true
             })
             
-            if (config.useUTS) {
-                utsManager = new UTSManager()
-                utsManager.initializeSingle(rawText)
-                decodedText = utsManager.getMergedText()
-                console.info('[UTS] Додано термінальний символ', {
-                    originalLength: rawText.length,
-                    processedLength: decodedText.length,
-                    terminalSymbol: DEFAULT_TERMINAL
-                })
-            } else {
-                decodedText = rawText
-            }
+            utsManager = new UTSManager()
+            utsManager.initializeMultiple(fileChunks.map(chunk => ({ name: chunk.name, text: chunk.text })))
+            decodedText = utsManager.getMergedText()
+            visibleMergedText = toVisibleText(decodedText)
+            fileBoundaries = utsManager.getBoundaries()
+            console.info('[Merge] Об\'єднано файли з роздільником', {
+                fileCount: fileChunks.length,
+                mergedLength: decodedText.length,
+                boundaries: fileBoundaries
+            })
             
             const processedBytes = new TextEncoder().encode(decodedText)
             sharedBuffer = new SharedArrayBuffer(processedBytes.byteLength)
@@ -384,7 +432,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     phase: 'subtree',
                     sharedBuffer,
                     group,
-                    useFrequencyTrie: config.useFrequencyTrie
+                    useFrequencyTrie: config.useFrequencyTrie,
+                    boundaries: fileBoundaries
                 })
             })
         })
@@ -557,19 +606,27 @@ document.addEventListener('DOMContentLoaded', function () {
         return trie
     }
 
-    async function handleFileSelect(file) {
-        currentFile = file
-        console.info('[Build] handleFileSelect отримав файл', { name: file.name, size: file.size })
-        const fileSize = (file.size / 1024).toFixed(2)
-        displayFileInfo(fileInfo, file.name, fileSize)
+    async function handleFileSelect(files) {
+        currentFiles = Array.isArray(files)
+            ? files.filter(file => file instanceof File)
+            : []
+
+        console.info('[Build] handleFileSelect отримав файли', {
+            count: currentFiles.length,
+            names: currentFiles.map(file => file.name)
+        })
+
+        displayFileInfo(fileInfo, currentFiles)
         
-        buildBtn.disabled = false
-        console.info('[Build] Кнопка побудови активована після вибору файлу')
+        buildBtn.disabled = currentFiles.length === 0
+        console.info('[Build] Кнопка побудови', buildBtn.disabled ? 'деактивована' : 'активована після вибору файлів')
         dgstTree = null
         sharedBuffer = null
         config = null
         utsManager = null
+        fileBoundaries = []
         decodedText = ''
+        visibleMergedText = ''
         latestSubTreeResult = null
         latestGroupPages = []
         currentGroupIndex = 0
@@ -579,7 +636,10 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (navPrevBtn) navPrevBtn.disabled = true
         if (navNextBtn) navNextBtn.disabled = true
-        if (navCurrentLabel) navCurrentLabel.textContent = '0'
+        if (navCurrentInput) {
+            navCurrentInput.disabled = true
+            navCurrentInput.value = ''
+        }
         if (navTotalLabel) navTotalLabel.textContent = '1'
         displayStatus(buildStatus, null, '')
     }

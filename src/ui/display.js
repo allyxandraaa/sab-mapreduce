@@ -1,7 +1,32 @@
-export function displayFileInfo(element, fileName, fileSize) {
+import { toVisibleText } from '../suffix-prefix/uts.js'
+
+export function displayFileInfo(element, files = []) {
+    if (!element) {
+        return
+    }
+
+    const fileList = Array.isArray(files) ? files : []
+    if (fileList.length === 0) {
+        element.innerHTML = ''
+        element.style.display = 'none'
+        return
+    }
+
+    const totalBytes = fileList.reduce((sum, file) => sum + (file?.size || 0), 0)
+    const totalSizeKb = (totalBytes / 1024).toFixed(2)
+    const previewCount = Math.min(5, fileList.length)
+    const previewNames = fileList.slice(0, previewCount).map(file => file?.name || 'невідомо')
+    const remaining = fileList.length - previewCount
+
+    const namesHtml = previewNames.map(name => `<li>${name}</li>`).join('')
+    const remainingHtml = remaining > 0 ? `<li>...та ще ${remaining}</li>` : ''
+
     element.innerHTML = `
-        <strong>Файл:</strong> ${fileName}<br>
-        <strong>Розмір:</strong> ${fileSize} KB
+        <strong>Файлів:</strong> ${fileList.length}<br>
+        <strong>Загальний розмір:</strong> ${totalSizeKb} KB
+        <ul class="file-info-list">
+            ${namesHtml}${remainingHtml}
+        </ul>
     `
     element.style.display = 'block'
 }
@@ -158,12 +183,23 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
                 return
             }
 
+            const treeToRender = {
+                ...treeData,
+                prefix: toVisibleText(treeData.prefix || ''),
+                edges: Array.isArray(treeData.edges)
+                    ? treeData.edges.map(edge => ({
+                        ...edge,
+                        labelPreview: toVisibleText(edge.labelPreview || '')
+                    }))
+                    : []
+            }
+
             const treeWrapper = document.createElement('div')
             treeWrapper.className = 'subtree-canonical'
 
             const prefixLabel = document.createElement('div')
             prefixLabel.className = 'subtree-prefix-label'
-            const prefixText = treeData.prefix ? `"${treeData.prefix}"` : '(порожній префікс)'
+            const prefixText = treeToRender.prefix ? `"${treeToRender.prefix}"` : '(порожній префікс)'
             prefixLabel.textContent = `Префікс: ${prefixText}`
             treeWrapper.appendChild(prefixLabel)
 
@@ -173,7 +209,7 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
             canvas.className = 'subtree-group-canvas-inner'
             treeCanvasWrapper.appendChild(canvas)
 
-            const hierarchyData = convertTreeToHierarchy(treeData)
+            const hierarchyData = convertTreeToHierarchy(treeToRender)
             if (!hierarchyData) {
                 canvas.innerHTML = '<div class="error">Не вдалося побудувати це піддерево</div>'
                 treeWrapper.appendChild(treeCanvasWrapper)
@@ -291,7 +327,7 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
                 .attr('stroke-width', 0.9)
 
             nodes.on('mouseenter', (event, d) => {
-                showTooltip(event, tooltip, formatTooltip(d, groupResult, normalizedText, treeData))
+                showTooltip(event, tooltip, formatTooltip(d, groupResult, normalizedText, treeToRender))
             }).on('mousemove', (event) => {
                 moveTooltip(event, tooltip)
             }).on('mouseleave', () => {

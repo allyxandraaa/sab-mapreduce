@@ -272,6 +272,36 @@ button:disabled {
 .subtree-nav-label {
     font-weight: 600;
     color: #475467;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.subtree-nav-input {
+    width: 72px;
+    padding: 6px 10px;
+    border: 1px solid #cdd5df;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #0f172a;
+    background: #fff;
+    text-align: center;
+}
+
+.subtree-nav-input:focus {
+    outline: none;
+    border-color: #34a853;
+    box-shadow: 0 0 0 2px rgba(52, 168, 83, 0.15);
+}
+
+.subtree-nav-input:disabled {
+    background: #f3f4f6;
+    color: #98a2b3;
+}
+
+.subtree-nav-separator {
+    color: #98a2b3;
 }
 
 .subtrees-visualization-canvas {

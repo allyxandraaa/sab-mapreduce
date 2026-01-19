@@ -1,5 +1,5 @@
 import { FrequencyTrie } from './frequencyTrie.js'
-import { isTerminalSymbol } from './uts.js'
+import { isSeparator, isTerminator } from './uts.js'
 
 const decoder = new TextDecoder('utf-8')
 
@@ -26,24 +26,21 @@ function computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, w
                 hasInvalidChar = true
                 break
             }
-            if (byte === 0x24 && j < slice.length - 1) {
-                hasInvalidChar = true
-                break
-            }
         }
         if (hasInvalidChar) continue
         
         const copy = new Uint8Array(slice)
         const prefix = decoder.decode(copy)
         
-        let hasUTS = false
-        for (let j = 0; j < prefix.length - 1; j++) {
-            if (isTerminalSymbol(prefix[j])) {
-                hasUTS = true
+        let crossesBoundary = false
+        for (let j = 0; j < prefix.length; j++) {
+            const char = prefix[j]
+            if (isSeparator(char) || isTerminator(char)) {
+                crossesBoundary = true
                 break
             }
         }
-        if (hasUTS) continue
+        if (crossesBoundary) continue
         
         if (targetSet) {
             let matches = false

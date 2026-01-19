@@ -1,20 +1,21 @@
 const decoder = new TextDecoder('utf-8')
 
-export function buildGroupSubTrees(text, group) {
+export function buildGroupSubTrees(text, group, options = {}) {
     if (!group || !Array.isArray(group.prefixes)) {
         return {
             suffixSubtrees: []
         }
     }
 
-    const suffixSubtrees = group.prefixes.map(prefixInfo => buildSubTreeForPrefix(text, prefixInfo))
+    const boundaries = options.boundaries || []
+    const suffixSubtrees = group.prefixes.map(prefixInfo => buildSubTreeForPrefix(text, prefixInfo, boundaries))
 
     return {
         suffixSubtrees
     }
 }
 
-export function buildSubTreeForPrefix(text, prefixInfo) {
+export function buildSubTreeForPrefix(text, prefixInfo, boundaries = []) {
     const prefix = prefixInfo?.prefix || ''
     if (!prefix) {
         return {
@@ -31,7 +32,7 @@ export function buildSubTreeForPrefix(text, prefixInfo) {
     const suffixPositions = collectSuffixPositions(text, prefix)
     const suffixArray = buildSuffixArray(text, suffixPositions)
     const lcpArray = buildLcpArray(text, suffixArray)
-    const { nodes, edges } = buildSuffixTreeStructure(text, suffixArray, lcpArray)
+    const { nodes, edges } = buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries)
 
     return {
         prefix,
@@ -106,9 +107,23 @@ function computeLcp(text, posA, posB) {
     return offset
 }
 
-function buildSuffixTreeStructure(text, suffixArray, lcpArray) {
+function buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries = []) {
     if (suffixArray.length === 0) {
         return { nodes: [], edges: [] }
+    }
+
+    const findStringMapping = (globalIndex) => {
+        for (let i = 0; i < boundaries.length; i++) {
+            const boundary = boundaries[i]
+            if (globalIndex >= boundary.start && globalIndex < boundary.end) {
+                return {
+                    stringId: boundary.index,
+                    stringName: boundary.name,
+                    localIndex: globalIndex - boundary.start
+                }
+            }
+        }
+        return null
     }
 
     const nodes = [{ id: 0, depth: 0, type: 'root' }]
@@ -127,11 +142,20 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray) {
 
         const nodeId = nextNodeId++
         const isLeaf = targetDepth === text.length - suffixPos
+        const leafData = isLeaf ? { suffixStart: suffixPos } : {}
+        if (isLeaf && boundaries.length > 0) {
+            const mapping = findStringMapping(suffixPos)
+            if (mapping) {
+                leafData.stringId = mapping.stringId
+                leafData.stringName = mapping.stringName
+                leafData.localIndex = mapping.localIndex
+            }
+        }
         nodes.push({ 
             id: nodeId, 
             depth: targetDepth, 
             type: isLeaf ? 'leaf' : 'internal',
-            ...(isLeaf ? { suffixStart: suffixPos } : {})
+            ...leafData
         })
         
         edges.push({
@@ -213,11 +237,20 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray) {
         const leafEnd = suffixStart + leafDepth
         
         const leafId = nextNodeId++
+        const leafData = { suffixStart }
+        if (boundaries.length > 0) {
+            const mapping = findStringMapping(suffixStart)
+            if (mapping) {
+                leafData.stringId = mapping.stringId
+                leafData.stringName = mapping.stringName
+                leafData.localIndex = mapping.localIndex
+            }
+        }
         nodes.push({ 
             id: leafId, 
             depth: leafDepth, 
             type: 'leaf', 
-            suffixStart
+            ...leafData
         })
         
         edges.push({
