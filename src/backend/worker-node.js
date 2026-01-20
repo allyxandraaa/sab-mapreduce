@@ -1,10 +1,11 @@
-import { createSplitView } from './splitter.js'
+import { parentPort, workerData } from 'worker_threads'
+import { createSplitView } from '../divide/splitter.js'
 import { computeSPrefixes } from '../suffix-prefix/sprefix.js'
-import { decodeSharedBuffer, buildGroupSubTrees } from '../subtree/helpers.js'
+import { buildGroupSubTrees, decodeSharedBuffer } from '../subtree/helpers.js'
 
-self.onmessage = function(event) {
+parentPort.on('message', (event) => {
     try {
-        const { phase, sharedBuffer, split, windowSize, partition, group } = event.data
+        const { phase, sharedBuffer, split, windowSize, partition, group, boundaries } = event
 
         if (phase === 'divide') {
             const splitView = createSplitView(sharedBuffer, split)
@@ -15,14 +16,13 @@ self.onmessage = function(event) {
                 split.end,
                 split.tailedEnd,
                 windowSize,
-                event.data.targetPrefixes || null
+                event.targetPrefixes || null
             )
             
-            // Результат тепер містить trie та sPrefixes
             const sPrefixes = result.sPrefixes || result
             const trie = result.trie || null
             
-            self.postMessage({
+            parentPort.postMessage({
                 type: 'success',
                 phase: 'divide',
                 splitIndex: split.index,
@@ -56,10 +56,10 @@ self.onmessage = function(event) {
                 }
             })
             
-            self.postMessage({
+            parentPort.postMessage({
                 type: 'success',
                 phase: 'reduce',
-                partitionIndex: event.data.partitionIndex,
+                partitionIndex: event.partitionIndex,
                 result: {
                     sPrefixes: Array.from(aggregated.values())
                 }
@@ -70,14 +70,14 @@ self.onmessage = function(event) {
             }
 
             const view = decodeSharedBuffer(sharedBuffer)
-            const boundaries = event.data.boundaries || []
+            const boundariesData = boundaries || []
             const options = {
-                useFrequencyTrie: event.data.useFrequencyTrie !== false,
-                boundaries
+                useFrequencyTrie: event.useFrequencyTrie !== false,
+                boundaries: boundariesData
             }
             const { suffixSubtrees } = buildGroupSubTrees(view, group, options)
 
-            self.postMessage({
+            parentPort.postMessage({
                 type: 'success',
                 phase: 'subtree',
                 groupId: group.id,
@@ -92,11 +92,10 @@ self.onmessage = function(event) {
             throw new Error(`Unknown phase: ${phase}`)
         }
     } catch (error) {
-        self.postMessage({
+        parentPort.postMessage({
             type: 'error',
             error: error.message || 'Unknown error',
             stack: error.stack
         })
     }
-}
-
+})

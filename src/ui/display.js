@@ -1,4 +1,4 @@
-import { toVisibleText } from '../suffix-prefix/uts.js'
+import { toVisibleText } from '../init/uts.js'
 
 const SUFFIX_TOOLTIP_PREVIEW = 256
 

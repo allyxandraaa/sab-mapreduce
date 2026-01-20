@@ -1,5 +1,5 @@
 import { FrequencyTrie } from './frequencyTrie.js'
-import { isSeparator, isTerminator } from './uts.js'
+import { isSeparator, isTerminator } from '../init/uts.js'
 
 const decoder = new TextDecoder('utf-8')
 
@@ -12,7 +12,14 @@ export function computeSPrefixes(splitView, start, end, tailedEnd, windowSize, t
 
 function computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, windowSize, targetPrefixes) {
     const trie = new FrequencyTrie()
-    const targetSet = targetPrefixes && targetPrefixes.length > 0 ? new Set(targetPrefixes) : null
+    let targetSet = null
+    if (targetPrefixes) {
+        if (targetPrefixes instanceof Set) {
+            targetSet = targetPrefixes
+        } else if (Array.isArray(targetPrefixes) || typeof targetPrefixes[Symbol.iterator] === 'function') {
+            targetSet = new Set(targetPrefixes)
+        }
+    }
     
     for (let i = 0; i < effectiveEnd; i++) {
         if (i + windowSize > effectiveTailedEnd) break
@@ -42,7 +49,7 @@ function computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, w
         }
         if (crossesBoundary) continue
         
-        if (targetSet) {
+        if (targetSet && targetSet.size > 0) {
             let matches = false
             for (const target of targetSet) {
                 if (prefix.startsWith(target)) {

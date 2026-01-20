@@ -1,90 +1,107 @@
-# SharedArrayBuffer MapReduce Implementation
+# Distributed Generalized Suffix Tree (DGST) — Client/Server Implementation
 
-A parallel file processing system utilizing SharedArrayBuffer and Web Workers, implementing the MapReduce distributed computing paradigm for client-side data processing.
+Цей проєкт переносить побудову Distributed Generalized Suffix Tree з браузера на Node.js backend із необмеженою памʼяттю та worker_threads, зберігаючи легкий frontend UI для візуалізації результатів.
 
-## Overview
+## 🧱 Архітектура
 
-This project demonstrates the application of SharedArrayBuffer for distributing large files across multiple Web Workers that perform parallel processing following the MapReduce algorithm. Each worker processes a designated portion of the file, resulting in significant performance improvements for large-scale data computations.
+- **Backend (Node.js)** — обробляє великі текстові файли, керує worker_threads, формує DGST і надає REST API.
+- **Frontend (Browser)** — завантажує файли через API, відображає статистику та піддерева (D3.js).
+- **SharedArrayBuffer** та TypedArray використовуються для нульового копіювання між воркерами.
 
-## Requirements
+```
+src/
+├── backend/
+│   ├── api.js           # Express API + статичні файли + CORS
+│   ├── dgst-engine.js   # Ініціалізація SAB, Map/Reduce/SubTree фази
+│   ├── worker-node.js   # worker_threads для divide/reduce/subtree
+│   └── iterative.js     # Алгоритм ітеративного розширення S-префіксів
+├── frontend/
+│   ├── api-client.js    # HTTP клієнт для /api
+│   └── main-client.js   # Логіка UI, polling, візуалізація
+├── divide/, subtree/, suffix-prefix/, init/ # доменна логіка DGST
+└── public/
+    ├── index.html
+    └── styles.css
+```
 
-- Node.js version 14 or higher
-- Modern web browser with SharedArrayBuffer support (Chrome, Edge, Firefox)
-
-## Installation
-
-No additional dependencies required. The project utilizes only built-in Node.js modules.
-
-## Execution
-
-Start the HTTP server:
+## 🚀 Запуск
 
 ```bash
-node server.js
+npm install
+npm start          # Node 18+ рекомендується
 ```
 
-Access the application at `http://localhost:8000/`
+- Сервер стартує на `http://localhost:3001`
+- У браузері відкриваємо `http://localhost:3001`
+- Завантажуємо `.txt` файли та запускаємо побудову
 
-Terminate the server with `Ctrl + C`.
+### Скрипти npm
 
-## Usage
+```json
+"scripts": {
+  "start": "node --max-old-space-size=12000 src/backend/api.js",
+  "dev": "node --max-old-space-size=8000 src/backend/api.js"
+}
+```
 
-1. Select a `.txt` file for processing
-2. Define the map function (JavaScript code)
-3. Define the reduce function (JavaScript code)
-4. Specify the number of worker threads (default: 4)
-5. Click "Apply Map Reduce" to initiate processing
+## 🧮 API Endpoints
 
-### Example 1: Simple Text Length Count
+| Метод | Endpoint | Опис |
+|-------|----------|------|
+| `POST` | `/api/jobs` | Створити новий Job, завантаживши файли (`multipart/form-data`) |
+| `GET` | `/api/jobs/:jobId/status` | Перевірити статус (running/completed/failed) |
+| `GET` | `/api/jobs/:jobId/groups` | Отримати мета-дані груп |
+| `GET` | `/api/jobs/:jobId/groups/:groupId` | Завантажити конкретне піддерево |
+| `GET` | `/api/jobs/:jobId/summary` | Підсумкова статистика і boundaries |
+| `DELETE` | `/api/jobs/:jobId` | Видалити Job і очистити памʼять |
 
-**Map Function:**
+### Приклад створення Job (fetch)
+
 ```javascript
-const decoder = new TextDecoder('utf-8');
-const text = decoder.decode(view);
-return text.length;
+const formData = new FormData()
+files.forEach(f => formData.append('files', f))
+
+const { jobId } = await fetch('/api/jobs', {
+  method: 'POST',
+  body: formData
+}).then(res => res.json())
 ```
 
-**Reduce Function:**
-```javascript
-return acc + curr;
+## 🖥️ Frontend потік
+
+1. Користувач обирає файли → `DGSTApiClient.createJob`
+2. Кнопка «Побудувати DGST» відправляє `POST /api/jobs`
+3. `pollUntilComplete` кожні 2s перевіряє статус
+4. Після `completed` фронтенд витягує `/summary` і `/groups`
+5. Навігація по групах підвантажує `/groups/:groupId` і рендерить D3
+
+## 💾 Налаштування памʼяті
+
+Прапор `--max-old-space-size` визначає доступну памʼять (у МБ):
+
+```bash
+npm start                       # 12 GB
+NODE_OPTIONS="--max-old-space-size=16000" npm start
 ```
 
-### Example 2: Word Count
+## ✅ Переваги серверної моделі
 
-**Map Function:**
-```javascript
-const decoder = new TextDecoder('utf-8');
-const text = decoder.decode(view);
-const words = text.split(/\s+/).filter(word => word.length > 0);
-return words.reduce((acc, word) => {
-    acc[word] = (acc[word] || 0) + 1;
-    return acc;
-}, {});
-```
+1. **Необмежена памʼять** (немає 4GB ліміту браузера)
+2. **Стабільність** — воркери не крашать UI
+3. **Доступ до файлової системи** (`fs`) та великих файлів
+4. **Розділення обовʼязків** — backend рахує, frontend рендерить
+5. **Просте масштабування** — запуск на окремому сервері/хмарі
 
-**Reduce Function:**
-```javascript
-Object.keys(curr).forEach(key => {
-    acc[key] = (acc[key] || 0) + curr[key];
-});
-return acc;
-```
+## 🧪 Тестування потоків
 
-## Server Requirement
+1. `npm start` в одному терміналі
+2. В браузері завантажуємо кілька `.txt` (можна великі файли)
+3. Спостерігаємо статус, статистику, перемикаємо піддерева
 
-SharedArrayBuffer requires specific HTTP security headers (`Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`) to mitigate Spectre/Meltdown-type attacks. These headers cannot be set via the `file://` protocol, necessitating an HTTP server.
+## 📚 Додаткова інформація
 
-## Technical Architecture
+- `src/ui/display.js` — D3 відображення піддерев, інваріант: працює з suffix identifiers (без повного тексту)
+- `src/subtree/builder.js` — керує rounds побудови піддерев, WorkerGroup -> suffixSubtrees
+- `src/backend/worker-node.js` — спільний код для divide/reduce/subtree, перевикористовує helpers
 
-**SharedArrayBuffer**: Enables shared memory between the main thread and Web Workers without data copying.
-
-**Web Workers**: Execute processing operations in separate threads without blocking the UI.
-
-**Typed Arrays (Uint8Array)**: Provide byte-level file manipulation and views into SharedArrayBuffer regions:
-```javascript
-const chunkView = new Uint8Array(sharedBuffer, startByte, lengthInBytes)
-```
-
-## Academic Context
-
-Coursework project for the National University of Kyiv Mohyla Academy (NaUKMA).
+Проєкт підтримує coursework для НаУКМА та демонструє повноцінний перехід від браузерного MapReduce до серверної архітектури з API.

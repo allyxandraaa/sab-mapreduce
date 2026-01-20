@@ -1,3 +1,13 @@
 {
-    "type": "module"
+    "name": "sab-mapreduce",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "start": "node --max-old-space-size=12000 src/backend/api.js",
+        "dev": "node --max-old-space-size=8000 src/backend/api.js"
+    },
+    "dependencies": {
+        "express": "^4.18.2",
+        "multer": "^1.4.5-lts.1"
+    }
 }
