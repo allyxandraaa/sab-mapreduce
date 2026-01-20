@@ -1,9 +1,9 @@
-import { readFileAsArrayBuffer } from './utils/fileUtils.js'
+import { copyFileToBuffer } from './utils/fileUtils.js'
 import { displayFileInfo, displayStatus, displaySubTreeVisualization, displayStats } from './ui/display.js'
 import { DGSTConfig } from './init/config.js'
 import { divideIntoSplits } from './divide/splitter.js'
 import { buildSubTrees } from './subtree/builder.js'
-import { UTSManager, toVisibleText } from './suffix-prefix/uts.js'
+import { UTSManager, toVisibleText, SEPARATOR, TERMINATOR } from './suffix-prefix/uts.js'
 import { shuffleByKey } from './merge/shuffle.js'
 import { FrequencyTrie } from './suffix-prefix/frequencyTrie.js'
 
@@ -165,17 +165,62 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
             const selectedFiles = Array.isArray(currentFiles) ? [...currentFiles] : []
             displayStatus(buildStatus, 'loading', `Завантаження ${selectedFiles.length} файлів...`)
-            const buffers = await Promise.all(selectedFiles.map(file => readFileAsArrayBuffer(file)))
-            const fileChunks = buffers.map((buffer, index) => {
-                const bytes = new Uint8Array(buffer)
-                const text = textDecoder.decode(bytes)
-                return {
-                    name: selectedFiles[index]?.name || `file-${index}`,
-                    text,
-                    byteLength: bytes.byteLength
-                }
+            
+            const separatorBytes = new TextEncoder().encode(SEPARATOR)
+            const terminatorBytes = new TextEncoder().encode(TERMINATOR)
+            const separatorSize = separatorBytes.length
+            const terminatorSize = terminatorBytes.length
+            
+            let totalSize = 0
+            selectedFiles.forEach(file => {
+                totalSize += file.size
             })
-
+            totalSize += (selectedFiles.length - 1) * separatorSize + terminatorSize
+            
+            displayStatus(buildStatus, 'loading', `Виділення пам\'яті (${(totalSize / 1024 / 1024).toFixed(2)} МБ)...`)
+            sharedBuffer = new SharedArrayBuffer(totalSize)
+            const view = new Uint8Array(sharedBuffer)
+            
+            fileBoundaries = []
+            let cursor = 0
+            
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i]
+                const start = cursor
+                
+                displayStatus(buildStatus, 'loading', `Копіювання ${file.name} (${i + 1}/${selectedFiles.length})...`)
+                const written = await copyFileToBuffer(file, view, cursor)
+                cursor += written
+                
+                fileBoundaries.push({
+                    index: i,
+                    name: file.name,
+                    start,
+                    end: cursor
+                })
+                
+                if (i < selectedFiles.length - 1) {
+                    view.set(separatorBytes, cursor)
+                    cursor += separatorSize
+                }
+            }
+            
+            view.set(terminatorBytes, cursor)
+            cursor += terminatorSize
+            
+            console.info('[Merge] Файли скопійовано безпосередньо в SAB', {
+                fileCount: selectedFiles.length,
+                totalBytes: totalSize,
+                actualWritten: cursor,
+                boundaries: fileBoundaries
+            })
+            
+            displayStatus(buildStatus, 'loading', 'Декодування для UI...')
+            const regularBuffer = new Uint8Array(view.length)
+            regularBuffer.set(view)
+            decodedText = textDecoder.decode(regularBuffer)
+            visibleMergedText = toVisibleText(decodedText)
+            
             displayStatus(buildStatus, 'loading', 'Ініціалізація конфігурації...')
             const numWorkers = parseInt(numWorkersInput.value) || 4
             config = new DGSTConfig({ 
@@ -184,23 +229,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 useFrequencyTrie: true
             })
             
-            utsManager = new UTSManager()
-            utsManager.initializeMultiple(fileChunks.map(chunk => ({ name: chunk.name, text: chunk.text })))
-            decodedText = utsManager.getMergedText()
-            visibleMergedText = toVisibleText(decodedText)
-            fileBoundaries = utsManager.getBoundaries()
-            console.info('[Merge] Об\'єднано файли з роздільником', {
-                fileCount: fileChunks.length,
-                mergedLength: decodedText.length,
-                boundaries: fileBoundaries
-            })
-            
-            const processedBytes = new TextEncoder().encode(decodedText)
-            sharedBuffer = new SharedArrayBuffer(processedBytes.byteLength)
-            const view = new Uint8Array(sharedBuffer)
-            view.set(processedBytes)
-            
-            await config.initialize(processedBytes.byteLength)
+            await config.initialize(totalSize)
             
             initializeWorkerPool(config.numWorkers)
             

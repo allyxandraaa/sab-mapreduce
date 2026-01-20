@@ -1,5 +1,7 @@
 import { toVisibleText } from '../suffix-prefix/uts.js'
 
+const SUFFIX_TOOLTIP_PREVIEW = 256
+
 export function displayFileInfo(element, files = []) {
     if (!element) {
         return
@@ -366,12 +368,22 @@ function convertTreeToHierarchy(tree) {
 }
 
 function formatTooltip(node, groupResult, sourceText, treeMeta) {
-    if (node.data.type === 'leaf') {
-        const suffix = getFullSuffix(node, sourceText)
-        const prefixLine = treeMeta?.prefix ? `\nПрефікс: ${treeMeta.prefix}` : ''
-        return `Група #${groupResult?.displayIndex ?? groupResult?.groupId ?? '?'}${prefixLine}\nСуфікс: ${suffix || 'невідомо'}`
+    if (node?.data?.type === 'leaf') {
+        const { excerpt, hasMore } = buildSuffixExcerpt(node, sourceText, SUFFIX_TOOLTIP_PREVIEW)
+        const stringName = node?.data?.stringName || 'невідомий файл'
+        const localIndex = typeof node?.data?.localIndex === 'number' ? node.data.localIndex : null
+        return {
+            type: 'leaf',
+            groupLabel: groupResult?.displayIndex ?? groupResult?.groupId ?? '?',
+            prefix: treeMeta?.prefix || '',
+            suffixPreview: excerpt || 'невідомо',
+            hasMore,
+            stringName,
+            localIndex,
+            getFullSuffix: () => getFullSuffix(node, sourceText)
+        }
     }
-    return `Вузол рівня ${node.depth || 0}`
+    return `Вузол рівня ${node?.depth || 0}`
 }
 
 function buildSuffixPreview(node, sourceText, maxLength = 32) {
@@ -383,6 +395,20 @@ function buildSuffixPreview(node, sourceText, maxLength = 32) {
         return node.data.edgeLabel.slice(0, maxLength)
     }
     return ''
+}
+
+function buildSuffixExcerpt(node, sourceText, maxLength = SUFFIX_TOOLTIP_PREVIEW) {
+    if (sourceText && typeof node?.data?.suffixStart === 'number') {
+        const start = node.data.suffixStart
+        const end = Math.min(sourceText.length, start + maxLength)
+        const excerpt = sourceText.slice(start, end).trim()
+        return {
+            excerpt,
+            hasMore: end < sourceText.length
+        }
+    }
+    const preview = buildSuffixPreview(node, sourceText, maxLength)
+    return { excerpt: preview.trim(), hasMore: false }
 }
 
 function getFullSuffix(node, sourceText) {
@@ -406,10 +432,91 @@ function ensureTooltip() {
 }
 
 function showTooltip(event, tooltip, content) {
-    tooltip.textContent = content
+    tooltip.innerHTML = ''
+
+    if (typeof content === 'string') {
+        tooltip.textContent = content
+    } else if (content && content.type === 'leaf') {
+        const title = document.createElement('div')
+        title.className = 'tooltip-title'
+        title.textContent = `Група #${content.groupLabel}`
+        tooltip.appendChild(title)
+
+        if (content.prefix) {
+            const prefixRow = document.createElement('div')
+            prefixRow.className = 'tooltip-prefix'
+            prefixRow.textContent = `Префікс: "${content.prefix}"`
+            tooltip.appendChild(prefixRow)
+        }
+
+        const metaRow = document.createElement('div')
+        metaRow.className = 'tooltip-meta'
+        const indexText = typeof content.localIndex === 'number' ? `, індекс ${content.localIndex}` : ''
+        metaRow.textContent = `Файл: ${content.stringName}${indexText}`
+        tooltip.appendChild(metaRow)
+
+        const previewRow = document.createElement('div')
+        previewRow.className = 'tooltip-suffix-preview'
+        previewRow.textContent = `Суфікс (перші ${SUFFIX_TOOLTIP_PREVIEW} симв.): ${content.suffixPreview}${content.hasMore ? '…' : ''}`
+        tooltip.appendChild(previewRow)
+
+        const copyBtn = document.createElement('button')
+        copyBtn.type = 'button'
+        copyBtn.className = 'tooltip-copy-button'
+        copyBtn.textContent = content.hasMore ? 'Скопіювати повний суфікс' : 'Скопіювати суфікс'
+        copyBtn.addEventListener('click', async (event) => {
+            event.stopPropagation()
+            const fullSuffix = typeof content.getFullSuffix === 'function'
+                ? content.getFullSuffix()
+                : content.suffixPreview
+            if (!fullSuffix) {
+                copyBtn.textContent = 'Немає даних'
+                return
+            }
+            const success = await copyTextToClipboard(fullSuffix)
+            copyBtn.textContent = success ? 'Скопійовано!' : 'Помилка копіювання'
+            setTimeout(() => {
+                copyBtn.textContent = content.hasMore ? 'Скопіювати повний суфікс' : 'Скопіювати суфікс'
+            }, 2000)
+        })
+        tooltip.appendChild(copyBtn)
+    } else {
+        tooltip.textContent = ''
+    }
+
     tooltip.style.display = 'block'
     tooltip.classList.add('is-visible')
     positionTooltip(event, tooltip)
+}
+
+async function copyTextToClipboard(text) {
+    if (!text) {
+        return false
+    }
+    if (navigator?.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text)
+            return true
+        } catch (error) {
+            console.warn('Не вдалося скопіювати через clipboard API', error)
+        }
+    }
+
+    try {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        const success = document.execCommand('copy')
+        document.body.removeChild(textarea)
+        return success
+    } catch (error) {
+        console.warn('Fallback копіювання не вдалося', error)
+        return false
+    }
 }
 
 function moveTooltip(event, tooltip) {
