@@ -1,3 +1,5 @@
+import { buildSuffixArrayWithLCPRange } from './lcpRange.js'
+
 const decoder = new TextDecoder('utf-8')
 
 export function buildGroupSubTrees(text, group, options = {}) {
@@ -30,8 +32,8 @@ export function buildSubTreeForPrefix(text, prefixInfo, boundaries = []) {
     }
 
     const suffixPositions = collectSuffixPositions(text, prefix)
-    const suffixArray = buildSuffixArray(text, suffixPositions)
-    const lcpArray = buildLcpArray(text, suffixArray)
+    const { suffixArray, lcpRanges } = buildSuffixArrayWithLCPRange(text, suffixPositions, 32)
+    const lcpArray = lcpRanges.map(lcpRange => lcpRange.offset)
     const { nodes, edges } = buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries)
 
     return {
@@ -65,48 +67,6 @@ function collectSuffixPositions(text, prefix) {
     }
     return positions
 }
-
-function buildSuffixArray(text, positions) {
-    const sorted = [...positions]
-    sorted.sort((a, b) => compareSuffixes(text, a, b))
-    return sorted
-}
-
-function compareSuffixes(text, posA, posB) {
-    if (posA === posB) return 0
-    const len = text.length
-    let offset = 0
-    while (posA + offset < len && posB + offset < len) {
-        const charCodeA = text.charCodeAt(posA + offset)
-        const charCodeB = text.charCodeAt(posB + offset)
-        if (charCodeA !== charCodeB) {
-            return charCodeA - charCodeB
-        }
-        offset++
-    }
-    return (len - posA) - (len - posB)
-}
-
-function buildLcpArray(text, suffixArray) {
-    if (suffixArray.length <= 1) return []
-    const lcps = []
-    for (let i = 1; i < suffixArray.length; i++) {
-        const prev = suffixArray[i - 1]
-        const curr = suffixArray[i]
-        lcps.push(computeLcp(text, prev, curr))
-    }
-    return lcps
-}
-
-function computeLcp(text, posA, posB) {
-    const len = text.length
-    let offset = 0
-    while (posA + offset < len && posB + offset < len && text.charCodeAt(posA + offset) === text.charCodeAt(posB + offset)) {
-        offset++
-    }
-    return offset
-}
-
 function buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries = []) {
     if (suffixArray.length === 0) {
         return { nodes: [], edges: [] }
