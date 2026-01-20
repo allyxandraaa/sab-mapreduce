@@ -69,13 +69,13 @@ self.onmessage = function(event) {
                 throw new Error('Відсутні дані для побудови піддерева')
             }
 
-            const text = decodeSharedBuffer(sharedBuffer)
+            const view = decodeSharedBuffer(sharedBuffer)
             const boundaries = event.data.boundaries || []
             const options = {
                 useFrequencyTrie: event.data.useFrequencyTrie !== false,
                 boundaries
             }
-            const { suffixSubtrees } = buildGroupSubTrees(text, group, options)
+            const { suffixSubtrees } = buildGroupSubTrees(view, group, options)
 
             self.postMessage({
                 type: 'success',

@@ -2,7 +2,8 @@ import { buildSuffixArrayWithLCPRange } from './lcpRange.js'
 
 const decoder = new TextDecoder('utf-8')
 
-export function buildGroupSubTrees(text, group, options = {}) {
+export function buildGroupSubTrees(textOrView, group, options = {}) {
+    const text = typeof textOrView === 'string' ? textOrView : decoder.decode(textOrView)
     if (!group || !Array.isArray(group.prefixes)) {
         return {
             suffixSubtrees: []
@@ -48,10 +49,13 @@ export function buildSubTreeForPrefix(text, prefixInfo, boundaries = []) {
 }
 
 export function decodeSharedBuffer(sharedBuffer) {
+    if (!sharedBuffer) {
+        return new Uint8Array(0)
+    }
     const sharedView = new Uint8Array(sharedBuffer)
     const copy = new Uint8Array(sharedView.length)
     copy.set(sharedView)
-    return decoder.decode(copy)
+    return copy
 }
 
 function collectSuffixPositions(text, prefix) {

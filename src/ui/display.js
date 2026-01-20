@@ -109,31 +109,30 @@ export function displayStats(stats) {
     `
 }
 
-export function displaySubTreeVisualization(subTrees, targetContainer = document.getElementById('subtrees-visualization'), sourceText = '') {
-    if (!targetContainer) {
+export function displaySubTreeVisualization(groupResults = [], container, sharedBuffer = null, textDecoder = null) {
+    if (!container) {
         return
     }
 
-    if (!Array.isArray(subTrees) || subTrees.length === 0) {
-        targetContainer.innerHTML = '<div class="loading">Піддерева ще не сформовані</div>'
+    if (!Array.isArray(groupResults) || groupResults.length === 0) {
+        container.innerHTML = '<div class="loading">Піддерева ще не сформовані</div>'
         return
     }
 
     if (typeof window === 'undefined' || typeof window.d3 === 'undefined') {
-        targetContainer.innerHTML = '<div class="error">D3.js недоступний для візуалізації</div>'
+        container.innerHTML = '<div class="error">D3.js недоступний для візуалізації</div>'
         return
     }
 
     const d3 = window.d3
-    const normalizedText = typeof sourceText === 'string' ? sourceText : ''
-    const containerWidth = targetContainer.clientWidth || 1100
+    const containerWidth = container.clientWidth || 1100
 
-    targetContainer.innerHTML = ''
+    container.innerHTML = ''
 
     const tooltip = ensureTooltip()
     const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
 
-    subTrees.forEach((groupResult, index) => {
+    groupResults.forEach((groupResult, index) => {
         const groupTrees = Array.isArray(groupResult?.suffixSubtrees) ? groupResult.suffixSubtrees : []
         if (groupTrees.length === 0) {
             return
@@ -157,7 +156,7 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
         groupWrapper.appendChild(groupTitle)
         groupWrapper.appendChild(groupMeta)
         groupWrapper.appendChild(canvasWrapper)
-        targetContainer.appendChild(groupWrapper)
+        container.appendChild(groupWrapper)
 
         const treeContexts = []
         const resetAllCanvases = () => {
@@ -329,7 +328,8 @@ export function displaySubTreeVisualization(subTrees, targetContainer = document
                 .attr('stroke-width', 0.9)
 
             nodes.on('mouseenter', (event, d) => {
-                showTooltip(event, tooltip, formatTooltip(d, groupResult, normalizedText, treeToRender))
+                const content = formatTooltip(d, groupResult, sharedBuffer, textDecoder, treeToRender)
+                showTooltip(event, tooltip, content)
             }).on('mousemove', (event) => {
                 moveTooltip(event, tooltip)
             }).on('mouseleave', () => {
@@ -367,56 +367,27 @@ function convertTreeToHierarchy(tree) {
     return root
 }
 
-function formatTooltip(node, groupResult, sourceText, treeMeta) {
+function formatTooltip(node, groupResult, sharedBuffer, textDecoder, treeMeta) {
     if (node?.data?.type === 'leaf') {
-        const { excerpt, hasMore } = buildSuffixExcerpt(node, sourceText, SUFFIX_TOOLTIP_PREVIEW)
+        const stringId = node?.data?.stringId ?? '?'
         const stringName = node?.data?.stringName || 'невідомий файл'
-        const localIndex = typeof node?.data?.localIndex === 'number' ? node.data.localIndex : null
+        const globalIndex = node?.data?.suffixStart ?? '?'
+        const suffixIdentifier = `[${stringId}:${globalIndex}]`
         return {
             type: 'leaf',
             groupLabel: groupResult?.displayIndex ?? groupResult?.groupId ?? '?',
             prefix: treeMeta?.prefix || '',
-            suffixPreview: excerpt || 'невідомо',
-            hasMore,
             stringName,
-            localIndex,
-            getFullSuffix: () => getFullSuffix(node, sourceText)
+            stringId,
+            globalIndex,
+            suffixIdentifier
         }
     }
     return `Вузол рівня ${node?.depth || 0}`
 }
 
-function buildSuffixPreview(node, sourceText, maxLength = 32) {
-    if (sourceText && typeof node?.data?.suffixStart === 'number') {
-        const preview = sourceText.slice(node.data.suffixStart, node.data.suffixStart + maxLength)
-        return preview.trim()
-    }
-    if (node?.data?.edgeLabel) {
-        return node.data.edgeLabel.slice(0, maxLength)
-    }
-    return ''
-}
 
-function buildSuffixExcerpt(node, sourceText, maxLength = SUFFIX_TOOLTIP_PREVIEW) {
-    if (sourceText && typeof node?.data?.suffixStart === 'number') {
-        const start = node.data.suffixStart
-        const end = Math.min(sourceText.length, start + maxLength)
-        const excerpt = sourceText.slice(start, end).trim()
-        return {
-            excerpt,
-            hasMore: end < sourceText.length
-        }
-    }
-    const preview = buildSuffixPreview(node, sourceText, maxLength)
-    return { excerpt: preview.trim(), hasMore: false }
-}
 
-function getFullSuffix(node, sourceText) {
-    if (sourceText && typeof node?.data?.suffixStart === 'number') {
-        return sourceText.slice(node.data.suffixStart)
-    }
-    return buildSuffixPreview(node, sourceText)
-}
 
 function ensureTooltip() {
     const tooltipId = 'subtree-tooltip'
@@ -451,33 +422,25 @@ function showTooltip(event, tooltip, content) {
 
         const metaRow = document.createElement('div')
         metaRow.className = 'tooltip-meta'
-        const indexText = typeof content.localIndex === 'number' ? `, індекс ${content.localIndex}` : ''
-        metaRow.textContent = `Файл: ${content.stringName}${indexText}`
+        metaRow.textContent = `Файл: ${content.stringName}`
         tooltip.appendChild(metaRow)
 
-        const previewRow = document.createElement('div')
-        previewRow.className = 'tooltip-suffix-preview'
-        previewRow.textContent = `Суфікс (перші ${SUFFIX_TOOLTIP_PREVIEW} симв.): ${content.suffixPreview}${content.hasMore ? '…' : ''}`
-        tooltip.appendChild(previewRow)
+        const identifierRow = document.createElement('div')
+        identifierRow.className = 'tooltip-suffix-identifier'
+        identifierRow.textContent = `Ідентифікатор суфікса: ${content.suffixIdentifier}`
+        tooltip.appendChild(identifierRow)
 
         const copyBtn = document.createElement('button')
         copyBtn.type = 'button'
         copyBtn.className = 'tooltip-copy-button'
-        copyBtn.textContent = content.hasMore ? 'Скопіювати повний суфікс' : 'Скопіювати суфікс'
+        copyBtn.textContent = 'Скопіювати ідентифікатор'
         copyBtn.addEventListener('click', async (event) => {
             event.stopPropagation()
-            const fullSuffix = typeof content.getFullSuffix === 'function'
-                ? content.getFullSuffix()
-                : content.suffixPreview
-            if (!fullSuffix) {
-                copyBtn.textContent = 'Немає даних'
-                return
-            }
-            const success = await copyTextToClipboard(fullSuffix)
+            const success = await copyTextToClipboard(content.suffixIdentifier)
             copyBtn.textContent = success ? 'Скопійовано!' : 'Помилка копіювання'
             setTimeout(() => {
-                copyBtn.textContent = content.hasMore ? 'Скопіювати повний суфікс' : 'Скопіювати суфікс'
-            }, 2000)
+                copyBtn.textContent = 'Скопіювати ідентифікатор'
+            }, 1500)
         })
         tooltip.appendChild(copyBtn)
     } else {

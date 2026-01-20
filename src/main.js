@@ -11,11 +11,8 @@ let dgstTree = null
 let currentFiles = []
 let sharedBuffer = null
 let config = null
-let utsManager = null
 let fileBoundaries = []
 const textDecoder = new TextDecoder('utf-8')
-let decodedText = ''
-let visibleMergedText = ''
 
 document.addEventListener('DOMContentLoaded', function () {
     const fileInput = document.getElementById('file-input')
@@ -71,8 +68,7 @@ document.addEventListener('DOMContentLoaded', function () {
             ...selectedGroup,
             displayIndex: safeIndex + 1
         }
-        const textForRender = typeof visibleMergedText === 'string' ? visibleMergedText : ''
-        displaySubTreeVisualization([displayGroup], subtreeCanvas, textForRender)
+        displaySubTreeVisualization([displayGroup], subtreeCanvas, sharedBuffer, textDecoder)
 
         if (navCurrentInput) {
             navCurrentInput.disabled = latestGroupPages.length === 0
@@ -214,12 +210,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 actualWritten: cursor,
                 boundaries: fileBoundaries
             })
-            
-            displayStatus(buildStatus, 'loading', 'Декодування для UI...')
-            const regularBuffer = new Uint8Array(view.length)
-            regularBuffer.set(view)
-            decodedText = textDecoder.decode(regularBuffer)
-            visibleMergedText = toVisibleText(decodedText)
             
             displayStatus(buildStatus, 'loading', 'Ініціалізація конфігурації...')
             const numWorkers = parseInt(numWorkersInput.value) || 4
@@ -654,8 +644,6 @@ document.addEventListener('DOMContentLoaded', function () {
         config = null
         utsManager = null
         fileBoundaries = []
-        decodedText = ''
-        visibleMergedText = ''
         latestSubTreeResult = null
         latestGroupPages = []
         currentGroupIndex = 0
