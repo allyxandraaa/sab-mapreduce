@@ -17,41 +17,11 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
     const memoryLimit = config?.memoryLimit || 1024
     const numWorkers = Math.max(1, config?.numWorkers)
 
-    console.info('[SubTree] Старт побудови піддерев', {
-        prefixes: sPrefixes.length,
-        memoryLimit,
-        numWorkers
-    })
+    console.info('[SubTree] Старт побудови піддерев:', sPrefixes.length, 'префіксів')
 
     const { groups, rounds } = allocateTaskGroups(sPrefixes, memoryLimit, numWorkers)
 
-    console.info('[SubTree] Результат розподілу груп', {
-        groupCount: groups.length,
-        roundCount: rounds.length,
-        avgPrefixesPerGroup: groups.length ? (sPrefixes.length / groups.length).toFixed(2) : 0
-    })
-
-    if (groups.length) {
-        console.info('[SubTree] Деталі груп', groups.map((group, index) => ({
-            order: index + 1,
-            groupId: group.id,
-            prefixCount: group.prefixes.length,
-            totalFrequency: group.totalFrequency,
-            prefixes: group.prefixes.map(prefix => ({
-                prefix: prefix.prefix,
-                frequency: prefix.frequency,
-                length: prefix.length
-            }))
-        })))
-    }
-
-    if (rounds.length) {
-        console.info('[SubTree] Розклад раундів', rounds.map((round, roundIndex) => ({
-            round: roundIndex + 1,
-            groupIds: round.map(group => group?.id),
-            prefixesPerGroup: round.map(group => group?.prefixes?.length || 0)
-        })))
-    }
+    console.info('[SubTree] Розподіл:', groups.length, 'груп,', rounds.length, 'раундів')
 
     const subTrees = []
     const suffixSubtrees = []
@@ -59,27 +29,18 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
     for (let index = 0; index < rounds.length; index++) {
         const round = rounds[index]
         const groupIds = round.map(group => group?.id)
-        console.info(`[SubTree] Виконуємо раунд ${index + 1}/${rounds.length}`, {
-            groupsInRound: round.length,
-            groupIds
-        })
+        console.info(`[SubTree] Раунд ${index + 1}/${rounds.length}...`)
 
-        const roundResults = await executeRound(round)
-
-        console.info(`[SubTree] Завершено раунд ${index + 1}/${rounds.length}`, {
-            receivedResults: roundResults.length,
-            nullResults: roundResults.filter(res => !res).length
-        })
+        let roundResults
+        try {
+            roundResults = await executeRound(round)
+        } catch (err) {
+            console.error(`[SubTree] Помилка раунду ${index + 1}:`, err)
+            throw err
+        }
 
         roundResults.forEach(result => {
-            if (!result) {
-                return
-            }
-            console.info('[SubTree] Отримано результат групи', {
-                groupId: result.groupId,
-                suffixTreeCount: result.treeCount,
-                totalFrequency: result.totalFrequency
-            })
+            if (!result) return
             subTrees.push(result)
             if (Array.isArray(result.suffixSubtrees)) {
                 suffixSubtrees.push(...result.suffixSubtrees)
@@ -87,10 +48,7 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
         })
     }
 
-    console.info('[SubTree] Побудову піддерев завершено', {
-        totalSubTrees: subTrees.length,
-        totalSuffixSubtrees: suffixSubtrees.length
-    })
+    console.info('[SubTree] Завершено:', suffixSubtrees.length, 'піддерев')
 
     return {
         groups,

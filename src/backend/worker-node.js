@@ -3,7 +3,7 @@ import { createSplitView } from '../divide/splitter.js'
 import { computeSPrefixes } from '../suffix-prefix/sprefix.js'
 import { buildGroupSubTrees, decodeSharedBuffer } from '../subtree/helpers.js'
 
-parentPort.on('message', (event) => {
+parentPort.on('message', async (event) => {
     try {
         const { phase, sharedBuffer, split, windowSize, partition, group, boundaries } = event
 
@@ -92,6 +92,7 @@ parentPort.on('message', (event) => {
             throw new Error(`Unknown phase: ${phase}`)
         }
     } catch (error) {
+        console.error('[Worker] Помилка:', event?.phase, error.message)
         parentPort.postMessage({
             type: 'error',
             error: error.message || 'Unknown error',
