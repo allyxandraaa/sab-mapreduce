@@ -1,18 +1,39 @@
-# Node.js dependencies
+# Dependencies
 node_modules/
 
-# Package manager lockfile (re-created per install)
-package-lock.json
+# Logs
+logs
+*.log
+npm-debug.log*
 
-# Environment / secrets
-.env
-.env.*
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
 
-# Build artifacts and caches
+# Coverage directory
+coverage/
+
+# Build output
 dist/
-.tmp/
-.cache/
+build/
 
-# OS metadata
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/

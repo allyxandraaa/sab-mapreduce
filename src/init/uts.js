@@ -1,8 +1,8 @@
-const PRIVATE_USE_SEPARATOR = 0xE000
-const PRIVATE_USE_TERMINATOR = 0xE001
+export const SEPARATOR_CODE = 0xE000
+export const TERMINATOR_CODE = 0xE001
 
-export const SEPARATOR = String.fromCodePoint(PRIVATE_USE_SEPARATOR)
-export const TERMINATOR = String.fromCodePoint(PRIVATE_USE_TERMINATOR)
+export const SEPARATOR = String.fromCodePoint(SEPARATOR_CODE)
+export const TERMINATOR = String.fromCodePoint(TERMINATOR_CODE)
 
 const SEPARATOR_VISIBLE = '#'
 const TERMINATOR_VISIBLE = '$'

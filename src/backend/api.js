@@ -8,18 +8,6 @@ import { dirname, join } from 'path'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-process.on('uncaughtException', (err) => {
-    console.error('[FATAL] Неперехоплений виняток:', err)
-    console.error('Stack:', err.stack)
-    process.exit(1)
-})
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('[FATAL] Необроблене відхилення Promise:', reason)
-    console.error('Promise:', promise)
-    process.exit(1)
-})
-
 const app = express()
 const upload = multer({ storage: multer.memoryStorage() })
 

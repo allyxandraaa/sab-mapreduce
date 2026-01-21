@@ -51,25 +51,17 @@ export async function buildDGST(files, options = {}) {
     })
 
     console.log('[DGST Engine] S-Prefixes computed:', allSPrefixes.length)
-    console.log('[DGST Engine] Початок побудови піддерев...')
 
-    let subTreeResult
-    try {
-        subTreeResult = await buildSubTrees({
-            sharedBuffer,
-            sPrefixes: allSPrefixes,
-            config,
-            executeRound: (round) => runSubTreeRoundNode(round, sharedBuffer, boundaries, config)
-        })
-        console.log('[DGST Engine] buildSubTrees завершено')
-    } catch (err) {
-        console.error('[DGST Engine] Помилка buildSubTrees:', err)
-        throw err
-    }
+    const subTreeResult = await buildSubTrees({
+        sharedBuffer,
+        sPrefixes: allSPrefixes,
+        config,
+        executeRound: (round) => runSubTreeRoundNode(round, sharedBuffer, boundaries, config)
+    })
 
     console.log('[DGST Engine] SubTrees built:', {
-        groups: subTreeResult?.groups?.length || 0,
-        subTrees: subTreeResult?.subTrees?.length || 0
+        groups: subTreeResult.groups.length,
+        subTrees: subTreeResult.subTrees.length
     })
 
     const suffixSubtrees = subTreeResult.suffixSubtrees || []
@@ -121,14 +113,12 @@ function runMapRoundNode(splitBatch, sharedBuffer, config) {
                     worker.terminate()
                     resolve(msg.result)
                 } else if (msg.type === 'error') {
-                    console.error('[DGST Map] Помилка воркера', i, ':', msg.error)
                     worker.terminate()
                     reject(new Error(msg.error))
                 }
             })
 
             worker.on('error', (err) => {
-                console.error('[DGST Map] Аварійне завершення воркера', i, ':', err?.message)
                 worker.terminate()
                 reject(err)
             })
@@ -163,14 +153,12 @@ function runReduceRoundNode(partitions, config) {
                     worker.terminate()
                     resolve(msg.result)
                 } else if (msg.type === 'error') {
-                    console.error('[DGST Reduce] Помилка воркера', i, ':', msg.error)
                     worker.terminate()
                     reject(new Error(msg.error))
                 }
             })
 
             worker.on('error', (err) => {
-                console.error('[DGST Reduce] Аварійне завершення воркера', i, ':', err?.message)
                 worker.terminate()
                 reject(err)
             })
@@ -204,14 +192,12 @@ function runSubTreeRoundNode(round, sharedBuffer, boundaries, config) {
                     worker.terminate()
                     resolve(msg.result)
                 } else if (msg.type === 'error') {
-                    console.error('[DGST SubTree] Помилка воркера', i, 'група', group?.id, ':', msg.error)
                     worker.terminate()
                     reject(new Error(msg.error))
                 }
             })
 
             worker.on('error', (err) => {
-                console.error('[DGST SubTree] Аварійне завершення воркера', i, 'група', group?.id, ':', err?.message)
                 worker.terminate()
                 reject(err)
             })

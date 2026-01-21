@@ -94,111 +94,47 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries = []) 
     const edges = []
     let nextNodeId = 1
 
-    const children = new Map()
-    children.set(0, new Map())
-
-    const getOrCreateChild = (parentId, parentDepth, char, targetDepth, suffixPos) => {
-        const parentChildren = children.get(parentId)
-        
-        if (parentChildren.has(char)) {
-            return parentChildren.get(char)
-        }
-
-        const nodeId = nextNodeId++
-        const isLeaf = targetDepth === text.length - suffixPos
-        const leafData = isLeaf ? { suffixStart: suffixPos } : {}
-        if (isLeaf && boundaries.length > 0) {
-            const mapping = findStringMapping(suffixPos)
-            if (mapping) {
-                leafData.stringId = mapping.stringId
-                leafData.stringName = mapping.stringName
-                leafData.localIndex = mapping.localIndex
-            }
-        }
-        nodes.push({ 
-            id: nodeId, 
-            depth: targetDepth, 
-            type: isLeaf ? 'leaf' : 'internal',
-            ...leafData
-        })
-        
-        edges.push({
-            from: parentId,
-            to: nodeId,
-            start: suffixPos + parentDepth,
-            end: suffixPos + targetDepth,
-            labelPreview: text.slice(suffixPos + parentDepth, Math.min(suffixPos + targetDepth, suffixPos + parentDepth + 32))
-        })
-        
-        parentChildren.set(char, { nodeId, depth: targetDepth })
-        children.set(nodeId, new Map())
-        
-        return { nodeId, depth: targetDepth }
-    }
-
-    const splitEdge = (parentId, parentDepth, existingChild, splitDepth, suffixPos) => {
-        const internalId = nextNodeId++
-        nodes.push({ id: internalId, depth: splitDepth, type: 'internal' })
-        children.set(internalId, new Map())
-
-        const edgeIndex = edges.findIndex(e => e.from === parentId && e.to === existingChild.nodeId)
-        if (edgeIndex !== -1) {
-            const oldEdge = edges[edgeIndex]
-            const oldStart = oldEdge.start
-            
-            oldEdge.to = internalId
-            oldEdge.end = oldStart + (splitDepth - parentDepth)
-            oldEdge.labelPreview = text.slice(oldEdge.start, Math.min(oldEdge.end, oldEdge.start + 32))
-
-            const continueChar = text.charAt(oldStart + (splitDepth - parentDepth))
-            children.get(internalId).set(continueChar, existingChild)
-
-            edges.push({
-                from: internalId,
-                to: existingChild.nodeId,
-                start: oldStart + (splitDepth - parentDepth),
-                end: oldStart + (existingChild.depth - parentDepth),
-                labelPreview: text.slice(oldStart + (splitDepth - parentDepth), Math.min(oldStart + (existingChild.depth - parentDepth), oldStart + (splitDepth - parentDepth) + 32))
-            })
-        }
-
-        const parentChildren = children.get(parentId)
-        const charToUpdate = text.charAt(suffixPos + parentDepth)
-        parentChildren.set(charToUpdate, { nodeId: internalId, depth: splitDepth })
-
-        return { nodeId: internalId, depth: splitDepth }
-    }
+    const stack = [{ nodeId: 0, depth: 0, lastChildId: -1 }]
 
     for (let i = 0; i < suffixArray.length; i++) {
         const suffixStart = suffixArray[i]
-        const lcp = i === 0 ? 0 : lcpArray[i - 1]
-
-        let currentNode = 0
-        let currentDepth = 0
-
-        while (currentDepth < lcp) {
-            const char = text.charAt(suffixStart + currentDepth)
-            const nodeChildren = children.get(currentNode)
-            
-            if (nodeChildren.has(char)) {
-                const child = nodeChildren.get(char)
-                if (child.depth <= lcp) {
-                    currentNode = child.nodeId
-                    currentDepth = child.depth
-                } else {
-                    const split = splitEdge(currentNode, currentDepth, child, lcp, suffixStart)
-                    currentNode = split.nodeId
-                    currentDepth = split.depth
-                    break
-                }
-            } else {
-                break
-            }
+        const lcp = i === 0 ? 0 : lcpArray[i]
+        
+        while (stack.length > 1 && stack[stack.length - 1].depth > lcp) {
+            stack.pop()
         }
-
-        const leafChar = text.charAt(suffixStart + currentDepth)
-        const leafDepth = text.length - suffixStart
-        const leafEnd = suffixStart + leafDepth
+        
+        if (stack.length > 0 && stack[stack.length - 1].depth < lcp) {
+            const internalId = nextNodeId++
+            const parentStackItem = stack[stack.length - 1]
+            const lastChildId = parentStackItem.lastChildId
+            
+            nodes.push({ id: internalId, depth: lcp, type: 'internal' })
+            
+            if (lastChildId !== -1) {
+                const edgeToModify = edges.find(e => e.to === lastChildId && e.from === parentStackItem.nodeId)
+                if (edgeToModify) {
+                    const prevSuffixStart = suffixArray[i - 1]
+                    const parentDepth = parentStackItem.depth
+                    
+                    const newEnd = edgeToModify.start + (lcp - parentDepth)
+                    edgeToModify.to = internalId
+                    edgeToModify.end = newEnd
+                    edgeToModify.labelPreview = text.slice(edgeToModify.start, Math.min(newEnd, edgeToModify.start + 32))
+                    
+                    edges.push({
+                        from: internalId,
+                        to: lastChildId,
+                        start: newEnd,
+                        end: text.length,
+                        labelPreview: text.slice(newEnd, Math.min(text.length, newEnd + 32))
+                    })
+                }
+            }
+            
+            parentStackItem.lastChildId = internalId
+            stack.push({ nodeId: internalId, depth: lcp, lastChildId: -1 })
+        }
         
         const leafId = nextNodeId++
         const leafData = { suffixStart }
@@ -210,6 +146,8 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries = []) 
                 leafData.localIndex = mapping.localIndex
             }
         }
+        
+        const leafDepth = text.length - suffixStart
         nodes.push({ 
             id: leafId, 
             depth: leafDepth, 
@@ -217,16 +155,19 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries = []) 
             ...leafData
         })
         
+        const parentStackItem = stack[stack.length - 1]
+        const parentNode = parentStackItem.nodeId
+        const parentDepth = parentStackItem.depth
+        
         edges.push({
-            from: currentNode,
+            from: parentNode,
             to: leafId,
-            start: suffixStart + currentDepth,
+            start: suffixStart + parentDepth,
             end: text.length,
-            labelPreview: text.slice(suffixStart + currentDepth, Math.min(text.length, suffixStart + currentDepth + 32))
+            labelPreview: text.slice(suffixStart + parentDepth, Math.min(text.length, suffixStart + parentDepth + 32))
         })
         
-        children.get(currentNode).set(leafChar, { nodeId: leafId, depth: leafDepth })
-        children.set(leafId, new Map())
+        stack[stack.length - 1].lastChildId = leafId
     }
 
     return { nodes, edges }

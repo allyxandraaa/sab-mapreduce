@@ -1,3 +1,11 @@
+import { SEPARATOR_CODE, TERMINATOR_CODE } from '../init/uts.js'
+
+function normalizeCharCodeForCompare(code) {
+    if (code === TERMINATOR_CODE) return -2
+    if (code === SEPARATOR_CODE) return -1
+    return code
+}
+
 export class LCPRange {
     constructor(char, range, offset) {
         this.char = char
@@ -18,8 +26,8 @@ export class LCPRange {
         const rangeMin = Math.min(rangeALen, rangeBLen)
 
         for (let i = 0; i < rangeMin; i++) {
-            const charA = lcpRangeA.range.charCodeAt(i)
-            const charB = lcpRangeB.range.charCodeAt(i)
+            const charA = normalizeCharCodeForCompare(lcpRangeA.range.charCodeAt(i))
+            const charB = normalizeCharCodeForCompare(lcpRangeB.range.charCodeAt(i))
             
             if (charA > charB) {
                 const newRange = textA.slice(posA + lcpRangeA.offset + i, posA + lcpRangeA.offset + rangeALen)
@@ -68,6 +76,8 @@ export class LCPRange {
 }
 
 export function buildSuffixArrayWithLCPRange(text, positions, rangeSize = 32) {
+    console.log(`[LCP] Input positions: ${positions.length} items: [${positions.join(',')}]`)
+    
     if (positions.length === 0) {
         return { suffixArray: [], lcpRanges: [] }
     }
@@ -83,34 +93,52 @@ export function buildSuffixArrayWithLCPRange(text, positions, rangeSize = 32) {
         lcpRange: null
     }))
 
-    items.sort((a, b) => {
-        if (a.lcpRange && b.lcpRange) {
-            const result = LCPRange.compare(text, a.pos, a.lcpRange, text, b.pos, b.lcpRange)
-            if (result.lcpRange.offset >= 0) {
-                if (result.smaller === a.pos) {
-                    b.lcpRange = result.lcpRange
-                    return -1
+    const sortedItems = []
+    for (const item of items) {
+        let inserted = false
+        for (let i = 0; i < sortedItems.length; i++) {
+            let cmp
+            if (item.lcpRange && sortedItems[i].lcpRange) {
+                const result = LCPRange.compare(text, item.pos, item.lcpRange, text, sortedItems[i].pos, sortedItems[i].lcpRange)
+                if (result && result.lcpRange && result.lcpRange.offset >= 0) {
+                    if (result.smaller === item.pos) {
+                        sortedItems[i].lcpRange = result.lcpRange
+                        cmp = -1
+                    } else {
+                        item.lcpRange = result.lcpRange
+                        cmp = 1
+                    }
                 } else {
-                    a.lcpRange = result.lcpRange
-                    return 1
+                    cmp = compareSuffixesDirect(text, item.pos, sortedItems[i].pos)
                 }
+            } else {
+                cmp = compareSuffixesDirect(text, item.pos, sortedItems[i].pos)
+            }
+            
+            if (cmp < 0) {
+                sortedItems.splice(i, 0, item)
+                inserted = true
+                break
             }
         }
-
-        return compareSuffixesDirect(text, a.pos, b.pos)
-    })
+        if (!inserted) {
+            sortedItems.push(item)
+        }
+    }
+    
+    const sortedPositions = sortedItems.map(item => item.pos)
 
     const suffixArray = []
     const lcpRanges = []
 
-    for (let i = 0; i < items.length; i++) {
-        suffixArray.push(items[i].pos)
+    for (let i = 0; i < sortedPositions.length; i++) {
+        suffixArray.push(sortedPositions[i])
         
         if (i === 0) {
-            const rangeEnd = Math.min(items[i].pos + rangeSize, text.length)
-            lcpRanges.push(new LCPRange('\0', text.slice(items[i].pos, rangeEnd), 0))
+            const rangeEnd = Math.min(sortedPositions[i] + rangeSize, text.length)
+            lcpRanges.push(new LCPRange('\0', text.slice(sortedPositions[i], rangeEnd), 0))
         } else {
-            const lcpRange = LCPRange.build(text, items[i].pos, items[i - 1].pos, rangeSize)
+            const lcpRange = LCPRange.build(text, sortedPositions[i], sortedPositions[i - 1], rangeSize)
             lcpRanges.push(lcpRange)
         }
     }
@@ -119,21 +147,19 @@ export function buildSuffixArrayWithLCPRange(text, positions, rangeSize = 32) {
 }
 
 function compareSuffixesDirect(text, posA, posB) {
-    // posA === posB
     if (posA === posB) return 0
     const len = text.length
     let offset = 0
     
     while (posA + offset < len && posB + offset < len) {
-        const charCodeA = text.charCodeAt(posA + offset)
-        const charCodeB = text.charCodeAt(posB + offset)
+        const charCodeA = normalizeCharCodeForCompare(text.charCodeAt(posA + offset))
+        const charCodeB = normalizeCharCodeForCompare(text.charCodeAt(posB + offset))
         if (charCodeA !== charCodeB) {
-            // posA < posB
             return charCodeA - charCodeB
         }
         offset++
     }
     
-    // posA > posB
+    // Коротший суфікс менший
     return (len - posA) - (len - posB)
 }
