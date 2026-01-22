@@ -42,7 +42,7 @@ app.post('/api/jobs', upload.array('files'), async (req, res) => {
             tailLength: req.body.tailLength ? parseInt(req.body.tailLength, 10) : null
         }
 
-        logger.log('API', 'New job created:', jobId, 'files:', uploadedFiles.length)
+        logger.log('API', 'Створено нове завдання:', jobId, 'файлів:', uploadedFiles.length)
         
         jobs.set(jobId, { 
             status: 'running', 
@@ -60,7 +60,7 @@ app.post('/api/jobs', upload.array('files'), async (req, res) => {
                     endTime,
                     duration: (endTime - jobs.get(jobId).startTime) / 1000
                 })
-                logger.log('API', 'Job completed:', jobId)
+                logger.log('API', 'Завдання завершено:', jobId)
             })
             .catch(err => {
                 jobs.set(jobId, { 
@@ -68,12 +68,12 @@ app.post('/api/jobs', upload.array('files'), async (req, res) => {
                     error: err.message,
                     stack: err.stack
                 })
-                logger.error('API', 'Job failed:', jobId, err)
+                logger.error('API', 'Завдання завершилося помилкою:', jobId, err)
             })
         
         res.json({ jobId, status: 'running' })
     } catch (error) {
-        logger.error('API', 'Error creating job:', error)
+        logger.error('API', 'Помилка створення завдання:', error)
         res.status(500).json({ error: error.message })
     }
 })
@@ -182,14 +182,14 @@ app.delete('/api/jobs/:jobId', (req, res) => {
 const PORT = process.env.PORT || 3001
 
 app.listen(PORT, () => {
-    logger.log('API', `DGST API server running on port ${PORT}`)
-    logger.log('API', `Endpoints:`)
-    logger.log('API', `  POST   /api/jobs - Create new DGST job`)
-    logger.log('API', `  GET    /api/jobs/:jobId/status - Get job status`)
-    logger.log('API', `  GET    /api/jobs/:jobId/groups - List all groups`)
-    logger.log('API', `  GET    /api/jobs/:jobId/groups/:groupId - Get specific group`)
-    logger.log('API', `  GET    /api/jobs/:jobId/summary - Get job summary`)
-    logger.log('API', `  DELETE /api/jobs/:jobId - Delete job`)
+    logger.log('API', `Сервер DGST API запущено на порту ${PORT}`)
+    logger.log('API', `Доступні ендпоінти:`)
+    logger.log('API', `  POST   /api/jobs - створити нове DGST-завдання`)
+    logger.log('API', `  GET    /api/jobs/:jobId/status - отримати стан завдання`)
+    logger.log('API', `  GET    /api/jobs/:jobId/groups - перелік усіх груп`)
+    logger.log('API', `  GET    /api/jobs/:jobId/groups/:groupId - отримати конкретну групу`)
+    logger.log('API', `  GET    /api/jobs/:jobId/summary - отримати підсумок завдання`)
+    logger.log('API', `  DELETE /api/jobs/:jobId - видалити завдання`)
 })
 
 export default app

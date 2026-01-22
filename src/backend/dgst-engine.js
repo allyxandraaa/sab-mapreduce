@@ -13,8 +13,8 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 export async function buildDGST(files, options = {}) {
-    logger.log('DGST Engine', 'Starting build for files:', files.map(f => f.name))
-    logger.log('DGST Engine', 'Files loaded:', files.map(f => `${f.name} (${f.data.length} bytes)`))
+    logger.log('DGST Engine', 'Починаємо побудову для файлів:', files.map(f => f.name))
+    logger.log('DGST Engine', 'Файли завантажено:', files.map(f => `${f.name} (${f.data.length} байт)`))
 
     const boundaries = calculateBoundaries(files)
     let workerPool = null
@@ -28,7 +28,7 @@ export async function buildDGST(files, options = {}) {
     
     populateSharedBuffer(files, sharedBuffer)
 
-    logger.log('DGST Engine', 'SharedArrayBuffer created:', {
+    logger.log('DGST Engine', 'Створено спільний буфер SharedArrayBuffer:', {
         totalSize: sharedBuffer.byteLength,
         boundaries: boundaries.length
     })
@@ -41,7 +41,7 @@ export async function buildDGST(files, options = {}) {
 
     await config.initialize(totalSize)
 
-    logger.log('DGST Engine', 'Config initialized:', {
+    logger.log('DGST Engine', 'Конфігурацію ініціалізовано:', {
         numWorkers: config.numWorkers,
         memoryLimit: config.memoryLimit,
         tailLength: config.tailLength
@@ -49,17 +49,17 @@ export async function buildDGST(files, options = {}) {
 
     const view = new Uint8Array(sharedBuffer)
     const splits = divideIntoSplits(view, config)
-    logger.log('DGST Engine', 'Splits created:', splits.length)
+    logger.log('DGST Engine', 'Створено сплітів:', splits.length)
 
     workerPool = new WorkerPool(config.numWorkers)
-    logger.log('DGST Engine', `Worker pool створено: ${config.numWorkers} воркерів`)
+    logger.log('DGST Engine', `Пул воркерів створено: ${config.numWorkers} воркерів`)
 
     const allSPrefixes = await processIteratively(splits, config, {
         executeMapRound: (splitBatch) => runMapRoundWithPool(splitBatch, sharedBuffer, config, workerPool),
         executeReduceRound: (partitions) => runReduceRoundWithPool(partitions, config, workerPool)
     })
 
-    logger.log('DGST Engine', 'S-Prefixes computed:', allSPrefixes.length)
+    logger.log('DGST Engine', 'S-префікси обчислено:', allSPrefixes.length)
 
     const subTreeResult = await buildSubTrees({
         sharedBuffer,
@@ -69,9 +69,9 @@ export async function buildDGST(files, options = {}) {
     })
 
     await workerPool.terminate()
-    logger.log('DGST Engine', 'Worker pool завершено')
+    logger.log('DGST Engine', 'Пул воркерів завершено')
 
-    logger.log('DGST Engine', 'SubTrees built:', {
+    logger.log('DGST Engine', 'Піддерева побудовано:', {
         groups: subTreeResult.groups.length,
         subTrees: subTreeResult.subTrees.length
     })
@@ -122,7 +122,7 @@ export async function buildDGST(files, options = {}) {
 }
 
 function runMapRoundWithPool(splitBatch, sharedBuffer, config, pool) {
-    logger.log('Map', `Виконуємо Map фазу для ${splitBatch.length} splits`)
+    logger.log('Map', `Виконуємо фазу Map для ${splitBatch.length} сплітів`)
 
     const promises = splitBatch.map((split, i) => {
         return pool.execute({
@@ -137,7 +137,7 @@ function runMapRoundWithPool(splitBatch, sharedBuffer, config, pool) {
 }
 
 function runReduceRoundWithPool(partitions, config, pool) {
-    logger.log('Reduce', `Виконуємо Reduce фазу для ${partitions.length} партицій`)
+    logger.log('Reduce', `Виконуємо фазу Reduce для ${partitions.length} партицій`)
 
     const promises = partitions.map((partition, i) => {
         return pool.execute({
@@ -151,7 +151,7 @@ function runReduceRoundWithPool(partitions, config, pool) {
 }
 
 function runSubTreeRoundWithPool(round, sharedBuffer, boundaries, config, pool) {
-    logger.log('SubTree', `Виконуємо SubTree раунд для ${round.length} груп`)
+    logger.log('SubTree', `Виконуємо раунд побудови піддерев для ${round.length} груп`)
 
     const promises = round.map((group, i) => {
         logger.log('SubTree', `Відправляємо завдання для групи ${group.id} (${group.prefixes?.length || 0} префіксів)`)

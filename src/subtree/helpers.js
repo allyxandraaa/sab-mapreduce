@@ -65,12 +65,11 @@ export function buildSubTreeForPrefix(text, prefixInfo, boundaries = []) {
         ? suffixPositions.slice(0, MAX_POSITIONS)
         : suffixPositions
     
-    // Побудова суфіксного масиву з LCP-діапазонами
     const { suffixArray, lcpRanges } = buildSuffixArrayWithLCPRange(text, positionsToSort, 32)
     const lcpArray = lcpRanges.map(lcpRange => lcpRange.offset)
     
     if (suffixArray.length > 1000) {
-        logger.log('SubTree', `Префікс "${prefix.slice(0, 10)}...": suffix array побудовано, будуємо структуру дерева...`)
+        logger.log('SubTree', `Префікс "${prefix.slice(0, 10)}...": суфіксний масив побудовано, переходимо до структури дерева...`)
     }
     
     const { nodes, edges } = buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries)

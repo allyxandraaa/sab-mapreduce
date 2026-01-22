@@ -81,13 +81,13 @@ parentPort.on('message', async (event) => {
                 }
             })
         } else if (phase === 'subtree') {
-            logger.log(`Worker ${workerData.workerId}`, `Отримано завдання subtree`)
+            logger.log(`Воркер ${workerData.workerId}`, `Отримано завдання побудови піддерев`)
             
             if (!sharedBuffer || !group) {
                 throw new Error('Відсутні дані для побудови піддерева')
             }
 
-            logger.log(`Worker ${workerData.workerId}`, `Група ${group.id}, префіксів: ${group.prefixes?.length || 0}`)
+            logger.log(`Воркер ${workerData.workerId}`, `Група ${group.id}, префіксів: ${group.prefixes?.length || 0}`)
             const sharedText = getSharedText(sharedBuffer)
             
             const boundariesData = boundaries || []
@@ -96,7 +96,7 @@ parentPort.on('message', async (event) => {
             }
             
             const { suffixSubtrees } = buildGroupSubTrees(sharedText, group, options)
-            logger.log(`Worker ${workerData.workerId}`, `Група ${group.id} завершена: ${suffixSubtrees.length} піддерев`)
+            logger.log(`Воркер ${workerData.workerId}`, `Група ${group.id} завершена: ${suffixSubtrees.length} піддерев`)
 
             parentPort.postMessage({
                 type: 'success',

@@ -83,8 +83,6 @@ export async function buildSubTrees({ sharedBuffer, sPrefixes, config, executeRo
             })
             
             subTrees.push(result)
-            
-            // Keep full tree data in memory
             if (Array.isArray(result.suffixSubtrees)) {
                 suffixSubtrees.push(...result.suffixSubtrees)
             }

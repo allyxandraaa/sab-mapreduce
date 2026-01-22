@@ -20,28 +20,28 @@ export async function processIteratively(splits, config, executors) {
             }
         })
 
-        logger.log('SPrefix', `Починаємо Map раунд для windowSize=${windowSize}, targetPrefixes=${targetPrefixes ? targetPrefixes.size : 'null'}`)
+        logger.log('SPrefix', `Починаємо раунд зіставлення для розміру вікна=${windowSize}, цільові префікси=${targetPrefixes ? targetPrefixes.size : 'немає'}`)
         const mapResults = await executeMapRound(updatedSplits, targetPrefixes)
-        logger.log('SPrefix', `Map раунд завершено, отримано ${mapResults.length} результатів`)
+        logger.log('SPrefix', `Раунд зіставлення завершено, отримано ${mapResults.length} результатів`)
         
         const partitions = shuffleByKey(mapResults, config.numWorkers)
-        logger.log('SPrefix', `Shuffle завершено, створено ${partitions.length} партицій`)
+        logger.log('SPrefix', `Перемішування ключів завершено, створено ${partitions.length} партицій`)
         
-        logger.log('SPrefix', `Починаємо Reduce раунд`)
+        logger.log('SPrefix', 'Починаємо раунд згортання')
         const reduceResults = await executeReduceRound(partitions)
-        logger.log('SPrefix', `Reduce раунд завершено, отримано ${reduceResults.length} результатів`)
+        logger.log('SPrefix', `Раунд згортання завершено, отримано ${reduceResults.length} результатів`)
         
         const mergedTrie = buildTrieFromReduceResults(reduceResults)
-        logger.log('SPrefix', `Trie побудовано, починаємо partitionByFrequency`)
+        logger.log('SPrefix', 'Префіксне дерево побудовано, запускаємо розподіл за частотою')
 
         const { accepted, needsExtension } = mergedTrie.partitionByFrequency(config.memoryLimit, windowSize)
-        logger.log('SPrefix', `partitionByFrequency завершено: accepted=${accepted.length}, needsExtension=${needsExtension.length}`)
+        logger.log('SPrefix', `Розподіл за частотою завершено: прийнято=${accepted.length}, потребують розширення=${needsExtension.length}`)
 
         accepted.forEach(sp => {
             finalPrefixes.push({ prefix: sp.prefix, frequency: sp.frequency, length: windowSize })
         })
 
-        logger.info('SPrefix', 'Ітерація з Frequency Trie', {
+        logger.info('SPrefix', 'Ітерація з частотним деревом', {
             windowSize,
             acceptedCount: accepted.length,
             needsExtensionCount: needsExtension.length
@@ -54,7 +54,7 @@ export async function processIteratively(splits, config, executors) {
 
         targetPrefixes = new Set(needsExtension.map(p => p.prefix))
         windowSize += windowStepSize
-        logger.log('SPrefix', `Переходимо до наступної ітерації з windowSize=${windowSize}`)
+        logger.log('SPrefix', `Переходимо до наступної ітерації з розміром вікна=${windowSize}`)
 
         if (windowSize > 100) {
             throw new Error('Досягнуто максимальний розмір вікна. Неможливо обробити всі префікси в межах memoryLimit.')

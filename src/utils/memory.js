@@ -21,15 +21,11 @@ export function calculateMemoryLimit({ fileSize = 0, numWorkers = null } = {}) {
     
     const BYTES_PER_SUFFIX_IN_PROCESSING = 20
     
-    // FM на основі пам'яті обробки
     const rawFM = Math.floor(memoryPerExecutor / BYTES_PER_SUFFIX_IN_PROCESSING)
-    const MIN_FM = 50000  // Базовий мінімум для швидкої обробки
+    const MIN_FM = 50000
     
-    // FM пропорційний розміру файлу - більші файли потребують вищий FM
-    // щоб зменшити кількість префіксів
     const targetFM = Math.max(MIN_FM, Math.floor(fileSize / 50))
     
-    // Обмежуємо доступною пам'яттю
     const memoryLimit = Math.min(rawFM, targetFM)
     
     console.log('Memory', 'розрахунок FM:', {
@@ -41,9 +37,6 @@ export function calculateMemoryLimit({ fileSize = 0, numWorkers = null } = {}) {
     return memoryLimit
 }
 
-/**
- * Розрахунок оптимальної кількості воркерів на основі розміру файлу.
- */
 export function calculateOptimalWorkers(fileSize, memoryLimit) {
     const minWorkers = 2
     const maxWorkers = 8
@@ -51,9 +44,6 @@ export function calculateOptimalWorkers(fileSize, memoryLimit) {
     return Math.max(minWorkers, Math.min(maxWorkers, workers))
 }
 
-/**
- * Перевірка чи файл поміститься в пам'яті.
- */
 export function canFitInMemory(fileSize, memoryLimit) {
     return fileSize <= memoryLimit
 }

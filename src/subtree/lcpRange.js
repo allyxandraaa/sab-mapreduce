@@ -86,21 +86,15 @@ export function buildSuffixArrayWithLCPRange(text, positions, rangeSize = 32) {
         }
     }
 
-    // Pre-compute text length once
     const textLen = text.length
     
-    // Use LCP-aware merge sort for better performance
     const sortedPositions = lcpMergeSort(text, textLen, positions)
-
-    // Build LCP ranges for the sorted array
     const suffixArray = sortedPositions
     const lcpRanges = new Array(sortedPositions.length)
     
-    // First element has no predecessor
     const firstPos = sortedPositions[0]
     lcpRanges[0] = new LCPRange('\0', text.slice(firstPos, Math.min(firstPos + rangeSize, textLen)), 0)
-    
-    // Build LCP for consecutive pairs
+
     for (let i = 1; i < sortedPositions.length; i++) {
         lcpRanges[i] = LCPRange.build(text, sortedPositions[i], sortedPositions[i - 1], rangeSize)
     }
@@ -108,54 +102,40 @@ export function buildSuffixArrayWithLCPRange(text, positions, rangeSize = 32) {
     return { suffixArray, lcpRanges }
 }
 
-/**
- * LCP-aware merge sort - uses LCP to skip redundant comparisons.
- * Key insight: when merging, we track how many characters we've already
- * determined are equal, avoiding re-comparison.
- */
 function lcpMergeSort(text, textLen, positions) {
     const n = positions.length
     if (n <= 1) return positions
-    
-    // For very small arrays, use optimized insertion sort
     if (n <= 32) {
         return quickInsertionSort(text, textLen, positions)
     }
     
-    const mid = n >>> 1  // Faster than Math.floor(n / 2)
+    const mid = n >>> 1 
     const left = lcpMergeSort(text, textLen, positions.slice(0, mid))
     const right = lcpMergeSort(text, textLen, positions.slice(mid))
     
     return lcpMerge(text, textLen, left, right)
 }
 
-/**
- * LCP-aware merge: uses running LCP to skip character comparisons.
- * When comparing left[i] vs right[j], we know they share at least
- * min(lcpLeft, lcpRight) characters with the last output element.
- */
 function lcpMerge(text, textLen, left, right) {
     const result = new Array(left.length + right.length)
     let i = 0, j = 0, k = 0
-    
-    // Track LCP with previous output element
-    let lcpWithLeft = 0   // LCP between result[k-1] and left[i]
-    let lcpWithRight = 0  // LCP between result[k-1] and right[j]
+
+    let lcpWithLeft = 0
+    let lcpWithRight = 0
     
     while (i < left.length && j < right.length) {
         const posL = left[i]
         const posR = right[j]
-        
-        // Start comparing from the known common prefix
+    
         const startOffset = Math.min(lcpWithLeft, lcpWithRight)
         const cmp = compareSuffixesFrom(text, textLen, posL, posR, startOffset)
         
         if (cmp <= 0) {
             result[k++] = posL
             i++
-            // Update LCP tracking: new left element has unknown LCP with previous output
+          
             if (i < left.length) {
-                lcpWithLeft = 0  // Reset, we don't know LCP with new left element
+                lcpWithLeft = 0  
             }
         } else {
             result[k++] = posR
@@ -166,7 +146,6 @@ function lcpMerge(text, textLen, left, right) {
         }
     }
     
-    // Copy remaining elements
     while (i < left.length) {
         result[k++] = left[i++]
     }
@@ -177,10 +156,6 @@ function lcpMerge(text, textLen, left, right) {
     return result
 }
 
-/**
- * Optimized insertion sort for small arrays.
- * Uses early termination and minimizes function call overhead.
- */
 function quickInsertionSort(text, textLen, positions) {
     const n = positions.length
     const result = new Array(n)
@@ -190,7 +165,6 @@ function quickInsertionSort(text, textLen, positions) {
         const current = result[i]
         let j = i - 1
         
-        // Inline comparison for speed
         while (j >= 0) {
             const cmp = compareSuffixesFast(text, textLen, result[j], current)
             if (cmp <= 0) break
@@ -203,9 +177,6 @@ function quickInsertionSort(text, textLen, positions) {
     return result
 }
 
-/**
- * Compare suffixes starting from a given offset (for LCP optimization)
- */
 function compareSuffixesFrom(text, textLen, posA, posB, startOffset) {
     if (posA === posB) return 0
     
@@ -218,7 +189,6 @@ function compareSuffixesFrom(text, textLen, posA, posB, startOffset) {
         const codeA = text.charCodeAt(posA + offset)
         const codeB = text.charCodeAt(posB + offset)
         
-        // Handle special characters
         const normA = codeA === TERMINATOR_CODE ? -2 : (codeA === SEPARATOR_CODE ? -1 : codeA)
         const normB = codeB === TERMINATOR_CODE ? -2 : (codeB === SEPARATOR_CODE ? -1 : codeB)
         
@@ -228,13 +198,9 @@ function compareSuffixesFrom(text, textLen, posA, posB, startOffset) {
         offset++
     }
     
-    // Shorter suffix is smaller
     return maxA - maxB
 }
 
-/**
- * Fast suffix comparison without normalization overhead for common case
- */
 function compareSuffixesFast(text, textLen, posA, posB) {
     if (posA === posB) return 0
     
@@ -247,7 +213,6 @@ function compareSuffixesFast(text, textLen, posA, posB) {
         const codeB = text.charCodeAt(posB + offset)
         
         if (codeA !== codeB) {
-            // Handle special characters only when different
             const normA = codeA === TERMINATOR_CODE ? -2 : (codeA === SEPARATOR_CODE ? -1 : codeA)
             const normB = codeB === TERMINATOR_CODE ? -2 : (codeB === SEPARATOR_CODE ? -1 : codeB)
             return normA - normB
