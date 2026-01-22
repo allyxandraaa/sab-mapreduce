@@ -6,8 +6,8 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 export class WorkerPool {
-    constructor(size, workerScript = 'worker-node.js') {
-        this.workerPath = join(__dirname, workerScript)
+    constructor(size) {
+        this.workerPath = join(__dirname, 'worker-node.js')
         this.workers = []
         this.nextWorkerIndex = 0
         

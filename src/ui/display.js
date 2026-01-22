@@ -109,7 +109,7 @@ export function displayStats(stats) {
     `
 }
 
-export function displaySubTreeVisualization(groupResults = [], container, sharedBuffer = null, textDecoder = null) {
+export async function displaySubTreeVisualization(groupResults = [], container, sharedBuffer = null, textDecoder = null) {
     if (!container) {
         return
     }
@@ -132,7 +132,9 @@ export function displaySubTreeVisualization(groupResults = [], container, shared
     const tooltip = ensureTooltip()
     const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
 
-    groupResults.forEach((groupResult, index) => {
+    for (let index = 0; index < groupResults.length; index++) {
+        const groupResult = groupResults[index]
+        await new Promise(resolve => setTimeout(resolve, 0))
         const groupTrees = Array.isArray(groupResult?.suffixSubtrees) ? groupResult.suffixSubtrees : []
         if (groupTrees.length === 0) {
             return
@@ -179,10 +181,13 @@ export function displaySubTreeVisualization(groupResults = [], container, shared
             canvasWrapper.appendChild(groupResetBtn)
         }
 
-        groupTrees.forEach((treeData, treeIndex) => {
+        for (let treeIndex = 0; treeIndex < groupTrees.length; treeIndex++) {
+            const treeData = groupTrees[treeIndex]
             if (!treeData || !Array.isArray(treeData.nodes) || treeData.nodes.length === 0) {
-                return
+                continue
             }
+            
+            await new Promise(resolve => requestAnimationFrame(resolve))
 
             const treeToRender = {
                 ...treeData,
@@ -338,8 +343,8 @@ export function displaySubTreeVisualization(groupResults = [], container, shared
 
             treeWrapper.appendChild(treeCanvasWrapper)
             canvasWrapper.appendChild(treeWrapper)
-        })
-    })
+        }
+    }
 }
 
 function convertTreeToHierarchy(tree) {
