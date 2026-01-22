@@ -76,8 +76,6 @@ export class LCPRange {
 }
 
 export function buildSuffixArrayWithLCPRange(text, positions, rangeSize = 32) {
-    console.log(`[LCP] Input positions: ${positions.length} items: [${positions.join(',')}]`)
-    
     if (positions.length === 0) {
         return { suffixArray: [], lcpRanges: [] }
     }

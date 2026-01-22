@@ -36,9 +36,9 @@ app.post('/api/jobs', upload.array('files'), async (req, res) => {
         }))
         
         const options = {
-            numWorkers: parseInt(req.body.numWorkers) || 4,
-            memoryLimit: parseInt(req.body.memoryLimit) || 2048,
-            tailLength: parseInt(req.body.tailLength) || 100
+            numWorkers: parseInt(req.body.numWorkers, 10) || 4,
+            memoryLimit: req.body.memoryLimit ? parseInt(req.body.memoryLimit, 10) : null,
+            tailLength: req.body.tailLength ? parseInt(req.body.tailLength, 10) : null
         }
 
         console.log('[API] New job created:', jobId, 'files:', uploadedFiles.length)

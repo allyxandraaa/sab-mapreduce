@@ -6,6 +6,7 @@ import { divideIntoSplits } from '../divide/splitter.js'
 import { buildSubTrees } from '../subtree/builder.js'
 import { processIteratively } from './iterative.js'
 import { calculateBoundaries, populateSharedBuffer } from '../init/uts.js'
+import { WorkerPool } from '../workers/worker-pool.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -15,6 +16,7 @@ export async function buildDGST(files, options = {}) {
     console.log('[DGST Engine] Files loaded:', files.map(f => `${f.name} (${f.data.length} bytes)`))
 
     const boundaries = calculateBoundaries(files)
+    let workerPool = null
     
     const encoder = new TextEncoder()
     const separatorBytes = encoder.encode('\uE000')
@@ -31,23 +33,29 @@ export async function buildDGST(files, options = {}) {
     })
 
     const config = new DGSTConfig({
-        numWorkers: options.numWorkers || 4,
-        memoryLimit: options.memoryLimit || 2048,
-        tailLength: options.tailLength || 100
+        numWorkers: options.numWorkers ?? 4,
+        memoryLimit: options.memoryLimit ?? null,
+        tailLength: options.tailLength ?? null
     })
+
+    await config.initialize(totalSize)
 
     console.log('[DGST Engine] Config initialized:', {
         numWorkers: config.numWorkers,
-        memoryLimit: config.memoryLimit
+        memoryLimit: config.memoryLimit,
+        tailLength: config.tailLength
     })
 
     const view = new Uint8Array(sharedBuffer)
     const splits = divideIntoSplits(view, config)
     console.log('[DGST Engine] Splits created:', splits.length)
 
+    workerPool = new WorkerPool(config.numWorkers)
+    console.log(`[DGST Engine] Worker pool створено: ${config.numWorkers} воркерів`)
+
     const allSPrefixes = await processIteratively(splits, config, {
-        executeMapRound: (splitBatch) => runMapRoundNode(splitBatch, sharedBuffer, config),
-        executeReduceRound: (partitions) => runReduceRoundNode(partitions, config)
+        executeMapRound: (splitBatch) => runMapRoundWithPool(splitBatch, sharedBuffer, config, workerPool),
+        executeReduceRound: (partitions) => runReduceRoundWithPool(partitions, config, workerPool)
     })
 
     console.log('[DGST Engine] S-Prefixes computed:', allSPrefixes.length)
@@ -56,8 +64,11 @@ export async function buildDGST(files, options = {}) {
         sharedBuffer,
         sPrefixes: allSPrefixes,
         config,
-        executeRound: (round) => runSubTreeRoundNode(round, sharedBuffer, boundaries, config)
+        executeRound: (round) => runSubTreeRoundWithPool(round, sharedBuffer, boundaries, config, workerPool)
     })
+
+    await workerPool.terminate()
+    console.log('[DGST Engine] Worker pool завершено')
 
     console.log('[DGST Engine] SubTrees built:', {
         groups: subTreeResult.groups.length,
@@ -97,122 +108,48 @@ export async function buildDGST(files, options = {}) {
     }
 }
 
-function runMapRoundNode(splitBatch, sharedBuffer, config) {
-    const workerPath = join(__dirname, 'worker-node.js')
-    const promises = []
+function runMapRoundWithPool(splitBatch, sharedBuffer, config, pool) {
+    console.log(`[Map] Виконуємо Map фазу для ${splitBatch.length} splits`)
 
-    for (let i = 0; i < splitBatch.length; i++) {
-        const split = splitBatch[i]
-        const promise = new Promise((resolve, reject) => {
-            const worker = new Worker(workerPath, {
-                workerData: { workerId: i }
-            })
-
-            worker.on('message', (msg) => {
-                if (msg.type === 'success') {
-                    worker.terminate()
-                    resolve(msg.result)
-                } else if (msg.type === 'error') {
-                    worker.terminate()
-                    reject(new Error(msg.error))
-                }
-            })
-
-            worker.on('error', (err) => {
-                worker.terminate()
-                reject(err)
-            })
-
-            worker.postMessage({
-                phase: 'divide',
-                sharedBuffer,
-                split,
-                windowSize: config.windowSize
-            })
+    const promises = splitBatch.map((split, i) => {
+        return pool.execute({
+            phase: 'divide',
+            sharedBuffer,
+            split,
+            windowSize: config.windowSize
         })
-
-        promises.push(promise)
-    }
+    })
 
     return Promise.all(promises)
 }
 
-function runReduceRoundNode(partitions, config) {
-    const workerPath = join(__dirname, 'worker-node.js')
-    const promises = []
+function runReduceRoundWithPool(partitions, config, pool) {
+    console.log(`[Reduce] Виконуємо Reduce фазу для ${partitions.length} партицій`)
 
-    for (let i = 0; i < partitions.length; i++) {
-        const partition = partitions[i]
-        const promise = new Promise((resolve, reject) => {
-            const worker = new Worker(workerPath, {
-                workerData: { workerId: i }
-            })
-
-            worker.on('message', (msg) => {
-                if (msg.type === 'success') {
-                    worker.terminate()
-                    resolve(msg.result)
-                } else if (msg.type === 'error') {
-                    worker.terminate()
-                    reject(new Error(msg.error))
-                }
-            })
-
-            worker.on('error', (err) => {
-                worker.terminate()
-                reject(err)
-            })
-
-            worker.postMessage({
-                phase: 'reduce',
-                partition,
-                partitionIndex: i
-            })
+    const promises = partitions.map((partition, i) => {
+        return pool.execute({
+            phase: 'reduce',
+            partition,
+            partitionIndex: i
         })
-
-        promises.push(promise)
-    }
+    })
 
     return Promise.all(promises)
 }
 
-function runSubTreeRoundNode(round, sharedBuffer, boundaries, config) {
-    const workerPath = join(__dirname, 'worker-node.js')
-    const promises = []
+function runSubTreeRoundWithPool(round, sharedBuffer, boundaries, config, pool) {
+    console.log(`[SubTree] Виконуємо SubTree раунд для ${round.length} груп`)
 
-    for (let i = 0; i < round.length; i++) {
-        const group = round[i]
-        const promise = new Promise((resolve, reject) => {
-            const worker = new Worker(workerPath, {
-                workerData: { workerId: i }
-            })
-
-            worker.on('message', (msg) => {
-                if (msg.type === 'success') {
-                    worker.terminate()
-                    resolve(msg.result)
-                } else if (msg.type === 'error') {
-                    worker.terminate()
-                    reject(new Error(msg.error))
-                }
-            })
-
-            worker.on('error', (err) => {
-                worker.terminate()
-                reject(err)
-            })
-
-            worker.postMessage({
-                phase: 'subtree',
-                sharedBuffer,
-                group,
-                boundaries,
-                useFrequencyTrie: true
-            })
+    const promises = round.map((group, i) => {
+        console.log(`[SubTree] Відправляємо завдання для групи ${group.id} (${group.prefixes?.length || 0} префіксів)`)
+        return pool.execute({
+            phase: 'subtree',
+            sharedBuffer,
+            group,
+            boundaries,
+            useFrequencyTrie: true
         })
-
-        promises.push(promise)
-    }
+    })
 
     return Promise.all(promises)
 }

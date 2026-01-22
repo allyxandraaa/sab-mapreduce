@@ -19,29 +19,41 @@ export async function processIteratively(splits, config, executors) {
             }
         })
 
+        console.log(`[SPrefix] Починаємо Map раунд для windowSize=${windowSize}, targetPrefixes=${targetPrefixes ? targetPrefixes.size : 'null'}`)
         const mapResults = await executeMapRound(updatedSplits, targetPrefixes)
+        console.log(`[SPrefix] Map раунд завершено, отримано ${mapResults.length} результатів`)
+        
         const partitions = shuffleByKey(mapResults, config.numWorkers)
+        console.log(`[SPrefix] Shuffle завершено, створено ${partitions.length} партицій`)
+        
+        console.log(`[SPrefix] Починаємо Reduce раунд`)
         const reduceResults = await executeReduceRound(partitions)
+        console.log(`[SPrefix] Reduce раунд завершено, отримано ${reduceResults.length} результатів`)
+        
         const mergedTrie = buildTrieFromReduceResults(reduceResults)
+        console.log(`[SPrefix] Trie побудовано, починаємо partitionByFrequency`)
 
         const { accepted, needsExtension } = mergedTrie.partitionByFrequency(config.memoryLimit, windowSize)
+        console.log(`[SPrefix] partitionByFrequency завершено: accepted=${accepted.length}, needsExtension=${needsExtension.length}`)
 
         accepted.forEach(sp => {
             finalPrefixes.push({ prefix: sp.prefix, frequency: sp.frequency, length: windowSize })
         })
-
-        if (needsExtension.length === 0) {
-            break
-        }
-
-        targetPrefixes = new Set(needsExtension.map(p => p.prefix))
-        windowSize += windowStepSize
 
         console.info('[SPrefix] Ітерація з Frequency Trie', {
             windowSize,
             acceptedCount: accepted.length,
             needsExtensionCount: needsExtension.length
         })
+
+        if (needsExtension.length === 0) {
+            console.log('[SPrefix] Всі префікси оброблено, виходимо з циклу')
+            break
+        }
+
+        targetPrefixes = new Set(needsExtension.map(p => p.prefix))
+        windowSize += windowStepSize
+        console.log(`[SPrefix] Переходимо до наступної ітерації з windowSize=${windowSize}`)
 
         if (windowSize > 100) {
             throw new Error('Досягнуто максимальний розмір вікна. Неможливо обробити всі префікси в межах memoryLimit.')

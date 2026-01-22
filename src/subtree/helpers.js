@@ -10,8 +10,17 @@ export function buildGroupSubTrees(textOrView, group, options = {}) {
         }
     }
 
+    console.log(`[SubTree] Обробка групи ${group.id}: ${group.prefixes.length} префіксів`)
+
     const boundaries = options.boundaries || []
-    const suffixSubtrees = group.prefixes.map(prefixInfo => buildSubTreeForPrefix(text, prefixInfo, boundaries))
+    const suffixSubtrees = group.prefixes.map((prefixInfo, idx) => {
+        if (idx % 100 === 0 && idx > 0) {
+            console.log(`[SubTree] Група ${group.id}: оброблено ${idx}/${group.prefixes.length} префіксів`)
+        }
+        return buildSubTreeForPrefix(text, prefixInfo, boundaries)
+    })
+
+    console.log(`[SubTree] Група ${group.id} завершена: побудовано ${suffixSubtrees.length} піддерев`)
 
     return {
         suffixSubtrees
@@ -33,9 +42,23 @@ export function buildSubTreeForPrefix(text, prefixInfo, boundaries = []) {
     }
 
     const suffixPositions = collectSuffixPositions(text, prefix)
+    
+    if (suffixPositions.length > 1000) {
+        console.log(`[SubTree] Префікс "${prefix.slice(0, 10)}...": знайдено ${suffixPositions.length} позицій, будуємо suffix array...`)
+    }
+    
     const { suffixArray, lcpRanges } = buildSuffixArrayWithLCPRange(text, suffixPositions, 32)
     const lcpArray = lcpRanges.map(lcpRange => lcpRange.offset)
+    
+    if (suffixPositions.length > 1000) {
+        console.log(`[SubTree] Префікс "${prefix.slice(0, 10)}...": suffix array побудовано, будуємо структуру дерева...`)
+    }
+    
     const { nodes, edges } = buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries)
+
+    if (suffixPositions.length > 1000) {
+        console.log(`[SubTree] Префікс "${prefix.slice(0, 10)}...": дерево побудовано (${nodes.length} вузлів, ${edges.length} ребер)`)
+    }
 
     return {
         prefix,
@@ -52,10 +75,7 @@ export function decodeSharedBuffer(sharedBuffer) {
     if (!sharedBuffer) {
         return new Uint8Array(0)
     }
-    const sharedView = new Uint8Array(sharedBuffer)
-    const copy = new Uint8Array(sharedView.length)
-    copy.set(sharedView)
-    return copy
+    return new Uint8Array(sharedBuffer)
 }
 
 function collectSuffixPositions(text, prefix) {

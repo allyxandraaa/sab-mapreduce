@@ -183,9 +183,7 @@ if (buildBtn) {
             
             const numWorkers = Math.max(1, parseInt(numWorkersInput?.value || '4', 10) || 4)
             const jobResult = await apiClient.createJob(currentFiles, {
-                numWorkers,
-                memoryLimit: 2048,
-                tailLength: 100
+                numWorkers
             })
 
             currentJobId = jobResult.jobId
