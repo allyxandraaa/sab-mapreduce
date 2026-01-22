@@ -2,6 +2,7 @@ import { parentPort, workerData } from 'worker_threads'
 import { createSplitView } from '../divide/splitter.js'
 import { computeSPrefixes } from '../suffix-prefix/sprefix.js'
 import { buildGroupSubTrees, decodeSharedBuffer } from '../subtree/helpers.js'
+import { logger } from '../utils/logger.js'
 
 const textDecoder = new TextDecoder('utf-8')
 let cachedSharedBuffer = null
@@ -18,7 +19,7 @@ function getSharedText(sharedBuffer) {
     return cachedDecodedText
 }
 
-parentPort.on('message', (event) => {
+parentPort.on('message', async (event) => {
     try {
         const { phase, sharedBuffer, split, windowSize, partition, group, boundaries } = event
 
@@ -80,27 +81,22 @@ parentPort.on('message', (event) => {
                 }
             })
         } else if (phase === 'subtree') {
-            console.log(`[Worker ${workerData.workerId}] Отримано завдання subtree, перевіряємо дані...`)
-            console.log(`[Worker ${workerData.workerId}] sharedBuffer: ${sharedBuffer ? 'присутній' : 'відсутній'}, group: ${group ? 'присутній' : 'відсутній'}`)
+            logger.log(`Worker ${workerData.workerId}`, `Отримано завдання subtree`)
             
             if (!sharedBuffer || !group) {
                 throw new Error('Відсутні дані для побудови піддерева')
             }
 
-            console.log(`[Worker ${workerData.workerId}] Група ${group.id}, префіксів: ${group.prefixes?.length || 0}`)
-            console.log(`[Worker ${workerData.workerId}] Декодуємо SharedBuffer (кешуємо текст)...`)
+            logger.log(`Worker ${workerData.workerId}`, `Група ${group.id}, префіксів: ${group.prefixes?.length || 0}`)
             const sharedText = getSharedText(sharedBuffer)
-            console.log(`[Worker ${workerData.workerId}] SharedBuffer декодовано, довжина тексту: ${sharedText.length}`)
             
             const boundariesData = boundaries || []
             const options = {
-                useFrequencyTrie: event.useFrequencyTrie !== false,
                 boundaries: boundariesData
             }
             
-            console.log(`[Worker ${workerData.workerId}] Починаємо buildGroupSubTrees для групи ${group.id}...`)
             const { suffixSubtrees } = buildGroupSubTrees(sharedText, group, options)
-            console.log(`[Worker ${workerData.workerId}] buildGroupSubTrees завершено для групи ${group.id}, побудовано ${suffixSubtrees.length} піддерев`)
+            logger.log(`Worker ${workerData.workerId}`, `Група ${group.id} завершена: ${suffixSubtrees.length} піддерев`)
 
             parentPort.postMessage({
                 type: 'success',
@@ -113,7 +109,6 @@ parentPort.on('message', (event) => {
                     suffixSubtrees
                 }
             })
-            console.log(`[Worker ${workerData.workerId}] Відправлено результат для групи ${group.id}`)
         } else {
             throw new Error(`Unknown phase: ${phase}`)
         }

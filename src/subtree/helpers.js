@@ -1,34 +1,39 @@
 import { buildSuffixArrayWithLCPRange } from './lcpRange.js'
+import { logger } from '../utils/logger.js'
+import { kmpFindAll } from '../utils/kmp.js'
 
 const decoder = new TextDecoder('utf-8')
 
 export function buildGroupSubTrees(textOrView, group, options = {}) {
     const text = typeof textOrView === 'string' ? textOrView : decoder.decode(textOrView)
     if (!group || !Array.isArray(group.prefixes)) {
-        return {
-            suffixSubtrees: []
-        }
+        return { suffixSubtrees: [] }
     }
 
-    console.log(`[SubTree] Обробка групи ${group.id}: ${group.prefixes.length} префіксів`)
+    logger.log('SubTree', `Обробка групи ${group.id}: ${group.prefixes.length} префіксів`)
 
     const boundaries = options.boundaries || []
-    const suffixSubtrees = group.prefixes.map((prefixInfo, idx) => {
+    const suffixSubtrees = []
+    
+    for (let idx = 0; idx < group.prefixes.length; idx++) {
+        const prefixInfo = group.prefixes[idx]
+        
         if (idx % 100 === 0 && idx > 0) {
-            console.log(`[SubTree] Група ${group.id}: оброблено ${idx}/${group.prefixes.length} префіксів`)
+            logger.log('SubTree', `Група ${group.id}: оброблено ${idx}/${group.prefixes.length} префіксів`)
         }
-        return buildSubTreeForPrefix(text, prefixInfo, boundaries)
-    })
-
-    console.log(`[SubTree] Група ${group.id} завершена: побудовано ${suffixSubtrees.length} піддерев`)
-
-    return {
-        suffixSubtrees
+        
+        const tree = buildSubTreeForPrefix(text, prefixInfo, boundaries)
+        suffixSubtrees.push(tree)
     }
+
+    logger.log('SubTree', `Група ${group.id} завершена: побудовано ${suffixSubtrees.length} піддерев`)
+
+    return { suffixSubtrees }
 }
 
 export function buildSubTreeForPrefix(text, prefixInfo, boundaries = []) {
     const prefix = prefixInfo?.prefix || ''
+    
     if (!prefix) {
         return {
             prefix: '',
@@ -41,29 +46,43 @@ export function buildSubTreeForPrefix(text, prefixInfo, boundaries = []) {
         }
     }
 
-    const suffixPositions = collectSuffixPositions(text, prefix)
+    const suffixPositions = collectSuffixPositionsKMP(text, prefix)
     
-    if (suffixPositions.length > 1000) {
-        console.log(`[SubTree] Префікс "${prefix.slice(0, 10)}...": знайдено ${suffixPositions.length} позицій, будуємо suffix array...`)
+    if (suffixPositions.length === 0) {
+        return {
+            prefix,
+            windowLength: prefix.length,
+            suffixCount: 0,
+            suffixArray: [],
+            lcpArray: [],
+            nodes: [],
+            edges: []
+        }
     }
+
+    const MAX_POSITIONS = 10000
+    const positionsToSort = suffixPositions.length > MAX_POSITIONS 
+        ? suffixPositions.slice(0, MAX_POSITIONS)
+        : suffixPositions
     
-    const { suffixArray, lcpRanges } = buildSuffixArrayWithLCPRange(text, suffixPositions, 32)
+    // Побудова суфіксного масиву з LCP-діапазонами
+    const { suffixArray, lcpRanges } = buildSuffixArrayWithLCPRange(text, positionsToSort, 32)
     const lcpArray = lcpRanges.map(lcpRange => lcpRange.offset)
     
-    if (suffixPositions.length > 1000) {
-        console.log(`[SubTree] Префікс "${prefix.slice(0, 10)}...": suffix array побудовано, будуємо структуру дерева...`)
+    if (suffixArray.length > 1000) {
+        logger.log('SubTree', `Префікс "${prefix.slice(0, 10)}...": suffix array побудовано, будуємо структуру дерева...`)
     }
     
     const { nodes, edges } = buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries)
 
-    if (suffixPositions.length > 1000) {
-        console.log(`[SubTree] Префікс "${prefix.slice(0, 10)}...": дерево побудовано (${nodes.length} вузлів, ${edges.length} ребер)`)
+    if (suffixArray.length > 1000) {
+        logger.log('SubTree', `Префікс "${prefix.slice(0, 10)}...": дерево побудовано (${nodes.length} вузлів, ${edges.length} ребер)`)
     }
 
     return {
         prefix,
         windowLength: prefix.length,
-        suffixCount: suffixArray.length,
+        suffixCount: suffixPositions.length,
         suffixArray,
         lcpArray,
         nodes,
@@ -91,15 +110,27 @@ function collectSuffixPositions(text, prefix) {
     }
     return positions
 }
+
+function collectSuffixPositionsKMP(text, prefix) {
+    if (!prefix) return []
+    return kmpFindAll(text, prefix)
+}
+
 function buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries = []) {
     if (suffixArray.length === 0) {
         return { nodes: [], edges: [] }
     }
 
-    const findStringMapping = (globalIndex) => {
-        for (let i = 0; i < boundaries.length; i++) {
-            const boundary = boundaries[i]
-            if (globalIndex >= boundary.start && globalIndex < boundary.end) {
+    const findStringMapping = boundaries.length === 0 ? () => null : (globalIndex) => {
+        let lo = 0, hi = boundaries.length - 1
+        while (lo <= hi) {
+            const mid = (lo + hi) >>> 1
+            const boundary = boundaries[mid]
+            if (globalIndex < boundary.start) {
+                hi = mid - 1
+            } else if (globalIndex >= boundary.end) {
+                lo = mid + 1
+            } else {
                 return {
                     stringId: boundary.index,
                     stringName: boundary.name,

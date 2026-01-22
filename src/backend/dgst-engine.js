@@ -7,13 +7,14 @@ import { buildSubTrees } from '../subtree/builder.js'
 import { processIteratively } from './iterative.js'
 import { calculateBoundaries, populateSharedBuffer } from '../init/uts.js'
 import { WorkerPool } from '../workers/worker-pool.js'
+import { logger } from '../utils/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 export async function buildDGST(files, options = {}) {
-    console.log('[DGST Engine] Starting build for files:', files.map(f => f.name))
-    console.log('[DGST Engine] Files loaded:', files.map(f => `${f.name} (${f.data.length} bytes)`))
+    logger.log('DGST Engine', 'Starting build for files:', files.map(f => f.name))
+    logger.log('DGST Engine', 'Files loaded:', files.map(f => `${f.name} (${f.data.length} bytes)`))
 
     const boundaries = calculateBoundaries(files)
     let workerPool = null
@@ -27,7 +28,7 @@ export async function buildDGST(files, options = {}) {
     
     populateSharedBuffer(files, sharedBuffer)
 
-    console.log('[DGST Engine] SharedArrayBuffer created:', {
+    logger.log('DGST Engine', 'SharedArrayBuffer created:', {
         totalSize: sharedBuffer.byteLength,
         boundaries: boundaries.length
     })
@@ -40,7 +41,7 @@ export async function buildDGST(files, options = {}) {
 
     await config.initialize(totalSize)
 
-    console.log('[DGST Engine] Config initialized:', {
+    logger.log('DGST Engine', 'Config initialized:', {
         numWorkers: config.numWorkers,
         memoryLimit: config.memoryLimit,
         tailLength: config.tailLength
@@ -48,17 +49,17 @@ export async function buildDGST(files, options = {}) {
 
     const view = new Uint8Array(sharedBuffer)
     const splits = divideIntoSplits(view, config)
-    console.log('[DGST Engine] Splits created:', splits.length)
+    logger.log('DGST Engine', 'Splits created:', splits.length)
 
     workerPool = new WorkerPool(config.numWorkers)
-    console.log(`[DGST Engine] Worker pool створено: ${config.numWorkers} воркерів`)
+    logger.log('DGST Engine', `Worker pool створено: ${config.numWorkers} воркерів`)
 
     const allSPrefixes = await processIteratively(splits, config, {
         executeMapRound: (splitBatch) => runMapRoundWithPool(splitBatch, sharedBuffer, config, workerPool),
         executeReduceRound: (partitions) => runReduceRoundWithPool(partitions, config, workerPool)
     })
 
-    console.log('[DGST Engine] S-Prefixes computed:', allSPrefixes.length)
+    logger.log('DGST Engine', 'S-Prefixes computed:', allSPrefixes.length)
 
     const subTreeResult = await buildSubTrees({
         sharedBuffer,
@@ -68,30 +69,42 @@ export async function buildDGST(files, options = {}) {
     })
 
     await workerPool.terminate()
-    console.log('[DGST Engine] Worker pool завершено')
+    logger.log('DGST Engine', 'Worker pool завершено')
 
-    console.log('[DGST Engine] SubTrees built:', {
+    logger.log('DGST Engine', 'SubTrees built:', {
         groups: subTreeResult.groups.length,
         subTrees: subTreeResult.subTrees.length
     })
 
+    const builderStats = subTreeResult.stats || {}
     const suffixSubtrees = subTreeResult.suffixSubtrees || []
-    const aggregatedTreeStats = suffixSubtrees.reduce((acc, tree) => {
-        if (!tree) return acc
-        
-        const nodeCount = Array.isArray(tree?.nodes) ? tree.nodes.length : 0
-        const edgeCount = Array.isArray(tree?.edges) ? tree.edges.length : 0
-        const treeDepth = Array.isArray(tree?.nodes) && tree.nodes.length
-            ? tree.nodes.reduce((max, node) => Math.max(max, node?.depth ?? 0), 0)
-            : 0
-        const suffixCount = typeof tree?.suffixCount === 'number' ? tree.suffixCount : 0
+    
+    let aggregatedTreeStats
+    if (builderStats.totalSuffixCount !== undefined) {
+        aggregatedTreeStats = {
+            totalNodes: builderStats.totalNodeCount || 0,
+            totalEdges: builderStats.totalEdgeCount || 0,
+            maxDepth: 0,
+            totalSuffixes: builderStats.totalSuffixCount || 0
+        }
+    } else {
+        aggregatedTreeStats = suffixSubtrees.reduce((acc, tree) => {
+            if (!tree) return acc
+            
+            const nodeCount = tree.nodeCount || (Array.isArray(tree?.nodes) ? tree.nodes.length : 0)
+            const edgeCount = tree.edgeCount || (Array.isArray(tree?.edges) ? tree.edges.length : 0)
+            const treeDepth = Array.isArray(tree?.nodes) && tree.nodes.length
+                ? tree.nodes.reduce((max, node) => Math.max(max, node?.depth ?? 0), 0)
+                : 0
+            const suffixCount = typeof tree?.suffixCount === 'number' ? tree.suffixCount : 0
 
-        acc.totalNodes += nodeCount
-        acc.totalEdges += edgeCount
-        acc.maxDepth = Math.max(acc.maxDepth, treeDepth)
-        acc.totalSuffixes += suffixCount
-        return acc
-    }, { totalNodes: 0, totalEdges: 0, maxDepth: 0, totalSuffixes: 0 })
+            acc.totalNodes += nodeCount
+            acc.totalEdges += edgeCount
+            acc.maxDepth = Math.max(acc.maxDepth, treeDepth)
+            acc.totalSuffixes += suffixCount
+            return acc
+        }, { totalNodes: 0, totalEdges: 0, maxDepth: 0, totalSuffixes: 0 })
+    }
 
     return {
         stats: {
@@ -109,7 +122,7 @@ export async function buildDGST(files, options = {}) {
 }
 
 function runMapRoundWithPool(splitBatch, sharedBuffer, config, pool) {
-    console.log(`[Map] Виконуємо Map фазу для ${splitBatch.length} splits`)
+    logger.log('Map', `Виконуємо Map фазу для ${splitBatch.length} splits`)
 
     const promises = splitBatch.map((split, i) => {
         return pool.execute({
@@ -124,7 +137,7 @@ function runMapRoundWithPool(splitBatch, sharedBuffer, config, pool) {
 }
 
 function runReduceRoundWithPool(partitions, config, pool) {
-    console.log(`[Reduce] Виконуємо Reduce фазу для ${partitions.length} партицій`)
+    logger.log('Reduce', `Виконуємо Reduce фазу для ${partitions.length} партицій`)
 
     const promises = partitions.map((partition, i) => {
         return pool.execute({
@@ -138,10 +151,10 @@ function runReduceRoundWithPool(partitions, config, pool) {
 }
 
 function runSubTreeRoundWithPool(round, sharedBuffer, boundaries, config, pool) {
-    console.log(`[SubTree] Виконуємо SubTree раунд для ${round.length} груп`)
+    logger.log('SubTree', `Виконуємо SubTree раунд для ${round.length} груп`)
 
     const promises = round.map((group, i) => {
-        console.log(`[SubTree] Відправляємо завдання для групи ${group.id} (${group.prefixes?.length || 0} префіксів)`)
+        logger.log('SubTree', `Відправляємо завдання для групи ${group.id} (${group.prefixes?.length || 0} префіксів)`)
         return pool.execute({
             phase: 'subtree',
             sharedBuffer,

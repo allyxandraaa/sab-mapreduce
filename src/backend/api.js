@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import { buildDGST } from './dgst-engine.js'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { logger } from '../utils/logger.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -41,7 +42,7 @@ app.post('/api/jobs', upload.array('files'), async (req, res) => {
             tailLength: req.body.tailLength ? parseInt(req.body.tailLength, 10) : null
         }
 
-        console.log('[API] New job created:', jobId, 'files:', uploadedFiles.length)
+        logger.log('API', 'New job created:', jobId, 'files:', uploadedFiles.length)
         
         jobs.set(jobId, { 
             status: 'running', 
@@ -59,7 +60,7 @@ app.post('/api/jobs', upload.array('files'), async (req, res) => {
                     endTime,
                     duration: (endTime - jobs.get(jobId).startTime) / 1000
                 })
-                console.log('[API] Job completed:', jobId)
+                logger.log('API', 'Job completed:', jobId)
             })
             .catch(err => {
                 jobs.set(jobId, { 
@@ -67,12 +68,12 @@ app.post('/api/jobs', upload.array('files'), async (req, res) => {
                     error: err.message,
                     stack: err.stack
                 })
-                console.error('[API] Job failed:', jobId, err)
+                logger.error('API', 'Job failed:', jobId, err)
             })
         
         res.json({ jobId, status: 'running' })
     } catch (error) {
-        console.error('[API] Error creating job:', error)
+        logger.error('API', 'Error creating job:', error)
         res.status(500).json({ error: error.message })
     }
 })
@@ -181,14 +182,14 @@ app.delete('/api/jobs/:jobId', (req, res) => {
 const PORT = process.env.PORT || 3001
 
 app.listen(PORT, () => {
-    console.log(`[API] DGST API server running on port ${PORT}`)
-    console.log(`[API] Endpoints:`)
-    console.log(`  POST   /api/jobs - Create new DGST job`)
-    console.log(`  GET    /api/jobs/:jobId/status - Get job status`)
-    console.log(`  GET    /api/jobs/:jobId/groups - List all groups`)
-    console.log(`  GET    /api/jobs/:jobId/groups/:groupId - Get specific group`)
-    console.log(`  GET    /api/jobs/:jobId/summary - Get job summary`)
-    console.log(`  DELETE /api/jobs/:jobId - Delete job`)
+    logger.log('API', `DGST API server running on port ${PORT}`)
+    logger.log('API', `Endpoints:`)
+    logger.log('API', `  POST   /api/jobs - Create new DGST job`)
+    logger.log('API', `  GET    /api/jobs/:jobId/status - Get job status`)
+    logger.log('API', `  GET    /api/jobs/:jobId/groups - List all groups`)
+    logger.log('API', `  GET    /api/jobs/:jobId/groups/:groupId - Get specific group`)
+    logger.log('API', `  GET    /api/jobs/:jobId/summary - Get job summary`)
+    logger.log('API', `  DELETE /api/jobs/:jobId - Delete job`)
 })
 
 export default app
