@@ -37,3 +37,9 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Data for benchmarks
+demo/dataset_*
+
+# Test scripts and results
+tests/

@@ -61,7 +61,10 @@ export async function processIteratively(splits, config, executors) {
         }
     }
 
-    return prunePrefixes(finalPrefixes)
+    return {
+        prefixes: prunePrefixes(finalPrefixes),
+        finalWindowSize: windowSize
+    }
 }
 
 function prunePrefixes(prefixes) {

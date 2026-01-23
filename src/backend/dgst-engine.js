@@ -54,10 +54,13 @@ export async function buildDGST(files, options = {}) {
     workerPool = new WorkerPool(config.numWorkers)
     logger.log('DGST Engine', `Пул воркерів створено: ${config.numWorkers} воркерів`)
 
-    const allSPrefixes = await processIteratively(splits, config, {
+    const iterativeResult = await processIteratively(splits, config, {
         executeMapRound: (splitBatch) => runMapRoundWithPool(splitBatch, sharedBuffer, config, workerPool),
         executeReduceRound: (partitions) => runReduceRoundWithPool(partitions, config, workerPool)
     })
+
+    const allSPrefixes = iterativeResult.prefixes
+    const finalWindowSize = iterativeResult.finalWindowSize
 
     logger.log('DGST Engine', 'S-префікси обчислено:', allSPrefixes.length)
 
@@ -113,7 +116,8 @@ export async function buildDGST(files, options = {}) {
             maxDepth: aggregatedTreeStats.maxDepth,
             totalSuffixes: aggregatedTreeStats.totalSuffixes,
             sPrefixes: allSPrefixes.length,
-            memoryLimit: config.memoryLimit
+            memoryLimit: config.memoryLimit,
+            finalWindowSize: finalWindowSize
         },
         groups: subTreeResult.groups,
         subTrees: subTreeResult.subTrees,

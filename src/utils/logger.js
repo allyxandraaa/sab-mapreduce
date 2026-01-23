@@ -51,4 +51,5 @@ class Logger {
 
 export const logger = new Logger()
 
-logger.disable('*')
+logger.enabledScopes.clear()
+logger.enable("SPrefix")
