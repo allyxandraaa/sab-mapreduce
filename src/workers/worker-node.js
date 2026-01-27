@@ -29,7 +29,6 @@ parentPort.on('message', async (event) => {
             const result = computeSPrefixes(
                 splitView,
                 split.start,
-                split.end,
                 split.tailedEnd,
                 windowSize,
                 event.targetPrefixes || null

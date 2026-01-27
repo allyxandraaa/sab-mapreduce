@@ -3,14 +3,13 @@ import { isSeparator, isTerminator } from '../init/uts.js'
 
 const decoder = new TextDecoder('utf-8')
 
-export function computeSPrefixes(splitView, start, end, tailedEnd, windowSize, targetPrefixes) {
-    const effectiveEnd = end - start
-    const effectiveTailedEnd = tailedEnd - start
+export function computeSPrefixes(splitView, start, tailedEnd, windowSize, targetPrefixes) {
+    const effectiveTailedEnd = Math.max(0, tailedEnd - start)
     
-    return computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, windowSize, targetPrefixes)
+    return computeSPrefixesWithTrie(splitView, effectiveTailedEnd, windowSize, targetPrefixes)
 }
 
-function computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, windowSize, targetPrefixes) {
+function computeSPrefixesWithTrie(splitView, effectiveTailedEnd, windowSize, targetPrefixes) {
     const trie = new FrequencyTrie()
     let targetSet = null
     if (targetPrefixes) {
@@ -21,10 +20,32 @@ function computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, w
         }
     }
     
-    for (let i = 0; i < effectiveEnd; i++) {
+    for (let i = 0; i < effectiveTailedEnd; ) {
         if (i + windowSize > effectiveTailedEnd) break
         
-        const slice = splitView.subarray(i, i + windowSize)
+        if (i < splitView.length) {
+            // перевірка на continuation bytes
+            const currentByte = splitView[i]
+            if ((currentByte & 0xC0) === 0x80) {
+                i++
+                continue
+            }
+        }
+        
+        let endPos = i + windowSize
+        let charByteLength = 1
+        
+        if (windowSize === 1 && i < splitView.length) {
+            const firstByte = splitView[i]
+            if ((firstByte & 0x80) === 0) {
+                charByteLength = 1  // ASCII символ
+            } else if ((firstByte & 0xF0) === 0xE0) {
+                charByteLength = 3  // 3-байтовий символ (термінатор U+E001 або сепаратор U+E000)
+            }
+            endPos = Math.min(i + charByteLength, effectiveTailedEnd)
+        }
+        
+        const slice = splitView.subarray(i, endPos)
         
         let hasInvalidChar = false
         for (let j = 0; j < slice.length; j++) {
@@ -34,20 +55,34 @@ function computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, w
                 break
             }
         }
-        if (hasInvalidChar) continue
+        if (hasInvalidChar) {
+            i += charByteLength
+            continue
+        }
         
         const copy = new Uint8Array(slice)
         const prefix = decoder.decode(copy)
+        
+        if (!prefix || prefix.includes('\uFFFD')) {
+            i += charByteLength
+            continue
+        }
         
         let crossesBoundary = false
         for (let j = 0; j < prefix.length; j++) {
             const char = prefix[j]
             if (isSeparator(char) || isTerminator(char)) {
+                if (prefix.length === 1) {
+                    break
+                }
                 crossesBoundary = true
                 break
             }
         }
-        if (crossesBoundary) continue
+        if (crossesBoundary) {
+            i += charByteLength
+            continue
+        }
         
         if (targetSet && targetSet.size > 0) {
             let matches = false
@@ -57,10 +92,14 @@ function computeSPrefixesWithTrie(splitView, effectiveEnd, effectiveTailedEnd, w
                     break
                 }
             }
-            if (!matches) continue
+            if (!matches) {
+                i += charByteLength
+                continue
+            }
         }
         
         trie.insert(prefix)
+        i += charByteLength
     }
     
     const prefixes = trie.collectPrefixes(windowSize)

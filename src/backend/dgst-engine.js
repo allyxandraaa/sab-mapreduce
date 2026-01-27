@@ -62,7 +62,7 @@ export async function buildDGST(files, options = {}) {
     const allSPrefixes = iterativeResult.prefixes
     const finalWindowSize = iterativeResult.finalWindowSize
 
-    logger.log('DGST Engine', 'S-префікси обчислено:', allSPrefixes.length)
+    logger.log('DGST Engine', 'S-префікси обчислено:', allSPrefixes)
 
     const subTreeResult = await buildSubTrees({
         sharedBuffer,

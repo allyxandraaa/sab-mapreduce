@@ -137,6 +137,16 @@ function buildSuffixTreeStructure(text, suffixArray, lcpArray, boundaries = []) 
                 }
             }
         }
+        if (boundaries.length) {
+            const last = boundaries[boundaries.length - 1]
+            if (globalIndex >= last.end) {
+                return {
+                    stringId: last.index,
+                    stringName: last.name,
+                    localIndex: last.end - last.start
+                }
+            }
+        }
         return null
     }
 

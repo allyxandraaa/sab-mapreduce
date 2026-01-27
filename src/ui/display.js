@@ -95,7 +95,7 @@ export function displayStats(stats) {
             </div>
             <div class="stat-item">
                 <div class="stat-label">S-префіксів</div>
-                <div class="stat-value">${stats.sPrefixes?.length ?? 0}</div>
+                <div class="stat-value">${Array.isArray(stats.sPrefixes) ? stats.sPrefixes.length : (Number.isFinite(stats.sPrefixes) ? stats.sPrefixes : 0)}</div>
             </div>
             <div class="stat-item">
                 <div class="stat-label">Ліміт пам'яті</div>
@@ -137,7 +137,7 @@ export async function displaySubTreeVisualization(groupResults = [], container, 
         await new Promise(resolve => setTimeout(resolve, 0))
         const groupTrees = Array.isArray(groupResult?.suffixSubtrees) ? groupResult.suffixSubtrees : []
         if (groupTrees.length === 0) {
-            return
+            continue
         }
 
         const groupWrapper = document.createElement('div')
